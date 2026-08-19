@@ -5,4 +5,5 @@ export const todos = pgTable("todos", {
   title: text("title").notNull(),
   completed: boolean("completed").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

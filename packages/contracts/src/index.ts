@@ -13,3 +13,4 @@ export type Todo = z.infer<typeof todoSchema>;
 export const createTodoSchema = todoSchema.pick({ title: true });
 
 export type CreateTodoInput = z.infer<typeof createTodoSchema>;
+//change things here

@@ -3,9 +3,9 @@ import { eq } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 
-import type { DatabaseError, NotFoundError, ValidationError } from "./errors.js";
-import { todos } from "./schema.js";
-import type * as schema from "./schema.js";
+import type { DatabaseError, NotFoundError, ValidationError } from "../db/errors.js";
+import { todos } from "../db/schema.js";
+import type * as schema from "../db/schema.js";
 
 type Db = NodePgDatabase<typeof schema>;
 

@@ -5,8 +5,8 @@ import {
   type DisposableDatabase,
   dropDisposableDatabase,
   migrateDisposableDatabase,
-} from "./test-db.js";
-import { createTodo, getTodoById, listTodos } from "./todo.repository.js";
+} from "../db/test-db";
+import { createTodo, getTodoById, listTodos } from "../module/todo.repository.js";
 
 describe("todos repository", () => {
   let database: DisposableDatabase;

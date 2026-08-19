@@ -4,7 +4,7 @@ import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Client, Pool } from "pg";
 
-import { env } from "../env.js";
+import { env } from "../module/config.js";
 import * as schema from "./schema.js";
 
 export type DisposableDb = NodePgDatabase<typeof schema>;
