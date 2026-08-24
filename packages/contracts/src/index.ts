@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-//just to put something here. might change in the future
 export const todoSchema = z.object({
   id: z.uuid(),
   title: z.string().min(6).max(100),
@@ -13,4 +12,15 @@ export type Todo = z.infer<typeof todoSchema>;
 export const createTodoSchema = todoSchema.pick({ title: true });
 
 export type CreateTodoInput = z.infer<typeof createTodoSchema>;
-//change things here
+
+export const todoListResponseSchema = z.object({
+  items: z.array(todoSchema),
+});
+
+export type TodoListResponse = z.infer<typeof todoListResponseSchema>;
+
+export const internalErrorResponseSchema = z.object({
+  error: z.object({ type: z.literal("internal") }),
+});
+
+export type InternalErrorResponse = z.infer<typeof internalErrorResponseSchema>;
