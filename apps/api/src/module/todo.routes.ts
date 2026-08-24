@@ -6,18 +6,34 @@ import {
 } from "@todo/contracts";
 import type { FastifyInstance } from "fastify";
 import type { Result } from "neverthrow";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 
 import type { DatabaseError, ValidationError } from "../db/errors.js";
-import type * as schema from "../db/schema.js";
+import type { Db } from "./todo.repository.js";
 import { listTodos } from "./todo.repository.js";
-
-type Db = NodePgDatabase<typeof schema>;
+import { createTodoFlow, type RequestValidationError } from "./todo.service.js";
 
 const internalErrorBody: InternalErrorResponse = { error: { type: "internal" } };
 
+export function toCreateTodoResponse(
+  result: Result<Todo, RequestValidationError | ValidationError | DatabaseError>,
+): { status: number; body: unknown } {
+  if (result.isOk()) {
+    return { status: 201, body: result.value };
+  }
+
+  if (result.error.type === "request_validation") {
+    return {
+      status: 400,
+      body: { error: { type: "validation", issues: result.error.issues } },
+    };
+  }
+
+  return { status: 500, body: internalErrorBody };
+}
+
 type ListTodosResponse =
-  { status: 200; body: TodoListResponse } | { status: 500; body: InternalErrorResponse };
+  | { status: 200; body: TodoListResponse }
+  | { status: 500; body: InternalErrorResponse };
 
 export function toListTodosResponse(
   result: Result<Todo[], DatabaseError | ValidationError>,
@@ -37,6 +53,17 @@ export function toListTodosResponse(
 }
 
 export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
+  app.post("/todos", async (request, reply) => {
+    const result = await createTodoFlow(db, request.body);
+
+    if (result.isErr() && result.error.type !== "request_validation") {
+      request.log.error({ err: result.error }, "POST /todos failed");
+    }
+
+    const { status, body } = toCreateTodoResponse(result);
+    return reply.code(status).send(body);
+  });
+
   app.get("/todos", async (_request, reply) => {
     const result = await listTodos(db);
     const { status, body } = toListTodosResponse(result);
