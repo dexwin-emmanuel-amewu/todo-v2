@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { todos } from "../db/schema.js";
 import {
   createDisposableDatabase,
   type DisposableDatabase,
@@ -50,5 +51,71 @@ describe("todos repository", () => {
         id: "00000000-0000-0000-0000-000000000000",
       });
     }
+  });
+
+  it("orders listed todos by createdAt ascending", async () => {
+    const first = await createTodo(database.db, { title: "Created first" });
+    const second = await createTodo(database.db, { title: "Created second" });
+    if (first.isErr() || second.isErr()) {
+      throw new Error("setup failed");
+    }
+
+    const listed = await listTodos(database.db);
+    if (listed.isErr()) throw listed.error;
+
+    const ids = listed.value.map((todo) => todo.id);
+    expect(ids.indexOf(first.value.id)).toBeLessThan(ids.indexOf(second.value.id));
+  });
+});
+
+describe("todos repository, createdAt ties", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("breaks a tied createdAt by ordering ids ascending", async () => {
+    const sameCreatedAt = new Date("2026-01-01T00:00:00.000Z");
+    const inserted = await database.db
+      .insert(todos)
+      .values([
+        { title: "Tied todo A", createdAt: sameCreatedAt },
+        { title: "Tied todo B", createdAt: sameCreatedAt },
+        { title: "Tied todo C", createdAt: sameCreatedAt },
+      ])
+      .returning();
+
+    const expectedIds = inserted.map((row) => row.id).sort();
+
+    const listed = await listTodos(database.db);
+    if (listed.isErr()) throw listed.error;
+
+    expect(listed.value.map((todo) => todo.id)).toEqual(expectedIds);
+  });
+});
+
+describe("todos repository, empty database", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("returns an empty list when no todos exist", async () => {
+    const listed = await listTodos(database.db);
+    if (listed.isErr()) throw listed.error;
+
+    expect(listed.value).toEqual([]);
   });
 });

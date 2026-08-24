@@ -13,6 +13,12 @@ export const createTodoSchema = todoSchema.pick({ title: true });
 
 export type CreateTodoInput = z.infer<typeof createTodoSchema>;
 
+export const todoListResponseSchema = z.object({
+  items: z.array(todoSchema),
+});
+
+export type TodoListResponse = z.infer<typeof todoListResponseSchema>;
+
 export const validationErrorResponseSchema = z.object({
   error: z.object({
     type: z.literal("validation"),

@@ -1,12 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import {
+  createDisposableDatabase,
+  type DisposableDatabase,
+  dropDisposableDatabase,
+  migrateDisposableDatabase,
+} from "../db/test-db";
 import { buildApp } from "./app.js";
-import type { Db } from "./todo.repository.js";
 
 describe("app", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
   it("responds to a health check", async () => {
-    // /health never touches the database, so an unused stub satisfies buildApp's signature.
-    const app = buildApp({} as Db);
+    const app = buildApp(database.db);
     const response = await app.inject({ method: "GET", url: "/health" });
 
     expect(response.statusCode).toBe(200);
