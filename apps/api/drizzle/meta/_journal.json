@@ -8,6 +8,13 @@
       "when": 1787111381780,
       "tag": "0000_useful_solo",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787626126557,
+      "tag": "0001_glorious_silvermane",
+      "breakpoints": true
     }
   ]
 }
