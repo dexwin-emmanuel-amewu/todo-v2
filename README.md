@@ -1,8 +1,10 @@
 ## Setup
+
 pnpm install
 cp .env.example .env
 
 ## Starting the app
+
 Both apps at once:
 pnpm dev
 
