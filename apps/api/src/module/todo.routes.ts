@@ -32,7 +32,8 @@ export function toCreateTodoResponse(
 }
 
 type ListTodosResponse =
-  { status: 200; body: TodoListResponse } | { status: 500; body: InternalErrorResponse };
+  | { status: 200; body: TodoListResponse }
+  | { status: 500; body: InternalErrorResponse };
 
 export function toListTodosResponse(
   result: Result<Todo[], DatabaseError | ValidationError>,
