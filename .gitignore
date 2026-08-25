@@ -1,0 +1,16 @@
+node_modules
+dist
+.env
+*.local
+*.tsbuildinfo
+
+# vite
+apps/web/.vite
+
+# testing
+coverage
+e2e/playwright-report
+e2e/test-results
+
+# os
+.DS_Store
