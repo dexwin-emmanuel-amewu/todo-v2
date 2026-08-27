@@ -1,7 +1,13 @@
-import { type CreateTodoInput, type Todo, todoSchema } from "@todo/contracts";
+import {
+  type CreateTodoInput,
+  type Todo,
+  type TodoStatusFilter,
+  todoSchema,
+} from "@todo/contracts";
 import { asc, eq } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
+import { match } from "ts-pattern";
 
 import type { DatabaseError, NotFoundError, ValidationError } from "../db/errors.js";
 import { todos } from "../db/schema.js";
@@ -53,9 +59,18 @@ export function getTodoById(
   });
 }
 
-export function listTodos(db: Db): ResultAsync<Todo[], DatabaseError | ValidationError> {
+export function listTodos(
+  db: Db,
+  filter: TodoStatusFilter = "all",
+): ResultAsync<Todo[], DatabaseError | ValidationError> {
+  const condition = match(filter)
+    .with("active", () => eq(todos.completed, false))
+    .with("completed", () => eq(todos.completed, true))
+    .with("all", () => undefined)
+    .exhaustive();
+
   return ResultAsync.fromPromise(
-    db.select().from(todos).orderBy(asc(todos.createdAt), asc(todos.id)),
+    db.select().from(todos).where(condition).orderBy(asc(todos.createdAt), asc(todos.id)),
     toDatabaseError,
   ).andThen((rows) => {
     const result: Todo[] = [];

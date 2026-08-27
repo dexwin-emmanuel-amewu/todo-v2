@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { todoSchema } from "./index";
+import { todoSchema, todoStatusFilterSchema } from "./index";
 
 describe("todoSchema", () => {
   it("parses a valid todo", () => {
@@ -11,5 +11,19 @@ describe("todoSchema", () => {
     });
 
     expect(result.success).toBe(true);
+  });
+});
+
+describe("todoStatusFilterSchema", () => {
+  it.each(["all", "active", "completed"])("accepts %s", (value) => {
+    expect(todoStatusFilterSchema.safeParse(value).success).toBe(true);
+  });
+
+  it("rejects an unknown status", () => {
+    expect(todoStatusFilterSchema.safeParse("bogus").success).toBe(false);
+  });
+
+  it("rejects an array, the shape a duplicate query param takes", () => {
+    expect(todoStatusFilterSchema.safeParse(["active", "completed"]).success).toBe(false);
   });
 });
