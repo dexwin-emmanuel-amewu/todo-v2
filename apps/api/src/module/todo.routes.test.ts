@@ -5,9 +5,11 @@ import {
   validationErrorResponseSchema,
   type Todo,
 } from "@todo/contracts";
+import { eq } from "drizzle-orm";
 import { err, ok } from "neverthrow";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { todos } from "../db/schema.js";
 import {
   createDisposableDatabase,
   type DisposableDatabase,
@@ -16,7 +18,7 @@ import {
 } from "../db/test-db";
 import { buildApp } from "./app.js";
 import { createTodo } from "./todo.repository.js";
-import { toCreateTodoResponse, toListTodosResponse } from "./todo.routes.js";
+import { parseStatusFilter, toCreateTodoResponse, toListTodosResponse } from "./todo.routes.js";
 
 const exampleTodo: Todo = {
   id: "5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a",
@@ -102,6 +104,35 @@ describe("toListTodosResponse", () => {
   });
 });
 
+describe("parseStatusFilter", () => {
+  it("defaults to all when status is omitted", () => {
+    const result = parseStatusFilter(undefined);
+
+    expect(result).toEqual(ok("all"));
+  });
+
+  it.each(["all", "active", "completed"])("accepts %s", (value) => {
+    const result = parseStatusFilter(value);
+
+    expect(result).toEqual(ok(value));
+  });
+
+  it("rejects an unknown status", () => {
+    const result = parseStatusFilter("bogus");
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.type).toBe("request_validation");
+    }
+  });
+
+  it("rejects a duplicate query param, which Fastify parses as an array", () => {
+    const result = parseStatusFilter(["active", "completed"]);
+
+    expect(result.isErr()).toBe(true);
+  });
+});
+
 describe("GET /todos", () => {
   let database: DisposableDatabase;
 
@@ -136,5 +167,87 @@ describe("GET /todos", () => {
 
     const ids: string[] = body.items.map((todo: Todo) => todo.id);
     expect(ids.indexOf(first.value.id)).toBeLessThan(ids.indexOf(second.value.id));
+  });
+});
+
+describe("GET /todos?status=", () => {
+  let database: DisposableDatabase;
+  let activeId: string;
+  let completedId: string;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+
+    const active = await createTodo(database.db, { title: "Active filter todo" });
+    const completed = await createTodo(database.db, { title: "Completed filter todo" });
+    if (active.isErr() || completed.isErr()) throw new Error("setup failed");
+
+    activeId = active.value.id;
+    completedId = completed.value.id;
+    await database.db.update(todos).set({ completed: true }).where(eq(todos.id, completedId));
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("returns every todo when status is omitted", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos" });
+
+    expect(response.statusCode).toBe(200);
+    const ids = response.json().items.map((todo: Todo) => todo.id);
+    expect(ids).toEqual(expect.arrayContaining([activeId, completedId]));
+  });
+
+  it("returns every todo for status=all", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?status=all" });
+
+    expect(response.statusCode).toBe(200);
+    const ids = response.json().items.map((todo: Todo) => todo.id);
+    expect(ids).toEqual(expect.arrayContaining([activeId, completedId]));
+  });
+
+  it("returns only active todos for status=active", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?status=active" });
+
+    expect(response.statusCode).toBe(200);
+    const items = response.json().items as Todo[];
+    expect(items.map((todo) => todo.id)).toContain(activeId);
+    expect(items.map((todo) => todo.id)).not.toContain(completedId);
+    expect(items.every((todo) => todo.completed === false)).toBe(true);
+  });
+
+  it("returns only completed todos for status=completed", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?status=completed" });
+
+    expect(response.statusCode).toBe(200);
+    const items = response.json().items as Todo[];
+    expect(items.map((todo) => todo.id)).toContain(completedId);
+    expect(items.map((todo) => todo.id)).not.toContain(activeId);
+    expect(items.every((todo) => todo.completed === true)).toBe(true);
+  });
+
+  it("returns 400 for an unknown status value", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?status=bogus" });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+  });
+
+  it("returns 400 for a duplicate status query param", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({
+      method: "GET",
+      url: "/todos?status=active&status=completed",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
   });
 });

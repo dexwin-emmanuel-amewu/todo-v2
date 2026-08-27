@@ -20,6 +20,7 @@
     "fastify": "^5.12.1",
     "neverthrow": "^8.2.0",
     "pg": "^8.23.0",
+    "ts-pattern": "^5.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

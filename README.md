@@ -16,7 +16,7 @@ pnpm --filter api dev
 
 Runs the Fastify API on `http://localhost:3000`. Check it's up with `curl http://localhost:3000/health`. Needs Postgres running (pnpm docker:up) and DATABASE_URL set (see .env.example).
 
-`GET /todos` returns every todo, oldest first (`created_at` ascending, `id` ascending as a tie-breaker). An empty database returns `{ "items": [] }`.
+`GET /todos` returns every todo, oldest first (`created_at` ascending, `id` ascending as a tie-breaker). An empty database returns `{ "items": [] }`. Filter with `?status=all|active|completed` (`all` is also the default when omitted). Any other value, or the param repeated more than once, returns 400.
 
 **Frontend**
 
