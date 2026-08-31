@@ -4,6 +4,7 @@ import {
   type TodoListResponse,
   type TodoStatusFilter,
   todoListResponseSchema,
+  todoSearchQuerySchema,
   todoStatusFilterSchema,
 } from "@todo/contracts";
 import type { FastifyInstance } from "fastify";
@@ -54,28 +55,47 @@ export function toListTodosResponse(
   return { status: 200, body: validated.data };
 }
 
-type StatusFilterValidationError = { type: "request_validation"; issues: string[] };
+type QueryValidationError = { type: "request_validation"; issues: string[] };
 
 export function parseStatusFilter(
   rawStatus: unknown,
-): Result<TodoStatusFilter, StatusFilterValidationError> {
+): Result<TodoStatusFilter, QueryValidationError> {
   return match(rawStatus)
-    .with(undefined, (): Result<TodoStatusFilter, StatusFilterValidationError> => ok("all"))
+    .with(undefined, (): Result<TodoStatusFilter, QueryValidationError> => ok("all"))
     .otherwise((value) => {
       const parsed = todoStatusFilterSchema.safeParse(value);
 
       return match(parsed)
-        .with(
-          { success: true },
-          ({ data }): Result<TodoStatusFilter, StatusFilterValidationError> => ok(data),
+        .with({ success: true }, ({ data }): Result<TodoStatusFilter, QueryValidationError> =>
+          ok(data),
         )
-        .with(
-          { success: false },
-          ({ error }): Result<TodoStatusFilter, StatusFilterValidationError> =>
-            err({
-              type: "request_validation",
-              issues: error.issues.map((issue) => issue.message),
-            }),
+        .with({ success: false }, ({ error }): Result<TodoStatusFilter, QueryValidationError> =>
+          err({
+            type: "request_validation",
+            issues: error.issues.map((issue) => issue.message),
+          }),
+        )
+        .exhaustive();
+    });
+}
+
+export function parseSearchQuery(
+  rawSearch: unknown,
+): Result<string | undefined, QueryValidationError> {
+  return match(rawSearch)
+    .with(undefined, (): Result<string | undefined, QueryValidationError> => ok(undefined))
+    .otherwise((value) => {
+      const parsed = todoSearchQuerySchema.safeParse(value);
+
+      return match(parsed)
+        .with({ success: true }, ({ data }): Result<string | undefined, QueryValidationError> =>
+          ok(data === "" ? undefined : data),
+        )
+        .with({ success: false }, ({ error }): Result<string | undefined, QueryValidationError> =>
+          err({
+            type: "request_validation",
+            issues: error.issues.map((issue) => issue.message),
+          }),
         )
         .exhaustive();
     });
@@ -94,15 +114,24 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
   });
 
   app.get("/todos", async (request, reply) => {
-    const filterResult = parseStatusFilter((request.query as { status?: unknown }).status);
+    const query = request.query as { status?: unknown; search?: unknown };
+    const filterResult = parseStatusFilter(query.status);
+    const searchResult = parseSearchQuery(query.search);
 
-    return filterResult.match(
-      async (filter) => {
-        const result = await listTodos(db, filter);
-        const { status, body } = toListTodosResponse(result);
-        return reply.status(status).send(body);
-      },
-      (error) => reply.status(400).send({ error: { type: "validation", issues: error.issues } }),
-    );
+    if (filterResult.isErr()) {
+      return reply
+        .status(400)
+        .send({ error: { type: "validation", issues: filterResult.error.issues } });
+    }
+
+    if (searchResult.isErr()) {
+      return reply
+        .status(400)
+        .send({ error: { type: "validation", issues: searchResult.error.issues } });
+    }
+
+    const result = await listTodos(db, filterResult.value, searchResult.value);
+    const { status, body } = toListTodosResponse(result);
+    return reply.status(status).send(body);
   });
 }
