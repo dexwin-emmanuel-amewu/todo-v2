@@ -158,6 +158,84 @@ describe("todos repository, status filter", () => {
   });
 });
 
+describe("todos repository, search", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("matches a case-insensitive substring of the title, not just a prefix", async () => {
+    const created = await createTodo(database.db, { title: "Write the milestone plan" });
+    if (created.isErr()) throw created.error;
+
+    const listed = await listTodos(database.db, "all", "mile");
+    if (listed.isErr()) throw listed.error;
+
+    expect(listed.value.map((todo) => todo.id)).toContain(created.value.id);
+  });
+
+  it("matches regardless of case", async () => {
+    const created = await createTodo(database.db, { title: "Write the milestone plan" });
+    if (created.isErr()) throw created.error;
+
+    const listed = await listTodos(database.db, "all", "MILE");
+    if (listed.isErr()) throw listed.error;
+
+    expect(listed.value.map((todo) => todo.id)).toContain(created.value.id);
+  });
+
+  it("returns an empty array when nothing matches", async () => {
+    const listed = await listTodos(database.db, "all", "zzz-no-match-anywhere");
+    if (listed.isErr()) throw listed.error;
+
+    expect(listed.value).toEqual([]);
+  });
+
+  it("behaves exactly like no search when search is undefined", async () => {
+    const unfiltered = await listTodos(database.db, "all");
+    const explicitUndefined = await listTodos(database.db, "all", undefined);
+    if (unfiltered.isErr() || explicitUndefined.isErr()) throw new Error("setup failed");
+
+    expect(explicitUndefined.value).toEqual(unfiltered.value);
+  });
+
+  it("treats literal percent and underscore characters as literal, not as wildcards", async () => {
+    const literal = await createTodo(database.db, { title: "100% done_deal today" });
+    const unrelated = await createTodo(database.db, { title: "Something else entirely" });
+    if (literal.isErr() || unrelated.isErr()) throw new Error("setup failed");
+
+    const listed = await listTodos(database.db, "all", "100% done_deal");
+    if (listed.isErr()) throw listed.error;
+
+    const ids = listed.value.map((todo) => todo.id);
+    expect(ids).toContain(literal.value.id);
+    expect(ids).not.toContain(unrelated.value.id);
+  });
+
+  it("combines status and search with AND", async () => {
+    const activeMatch = await createTodo(database.db, { title: "Ship the search feature" });
+    const completedMatch = await createTodo(database.db, { title: "Ship the search docs" });
+    if (activeMatch.isErr() || completedMatch.isErr()) throw new Error("setup failed");
+    await database.db
+      .update(todos)
+      .set({ completed: true })
+      .where(eq(todos.id, completedMatch.value.id));
+
+    const listed = await listTodos(database.db, "active", "ship the search");
+    if (listed.isErr()) throw listed.error;
+
+    const ids = listed.value.map((todo) => todo.id);
+    expect(ids).toContain(activeMatch.value.id);
+    expect(ids).not.toContain(completedMatch.value.id);
+  });
+});
+
 describe("todos repository, empty database", () => {
   let database: DisposableDatabase;
 

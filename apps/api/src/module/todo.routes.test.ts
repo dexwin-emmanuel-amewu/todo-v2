@@ -18,7 +18,12 @@ import {
 } from "../db/test-db";
 import { buildApp } from "./app.js";
 import { createTodo } from "./todo.repository.js";
-import { parseStatusFilter, toCreateTodoResponse, toListTodosResponse } from "./todo.routes.js";
+import {
+  parseSearchQuery,
+  parseStatusFilter,
+  toCreateTodoResponse,
+  toListTodosResponse,
+} from "./todo.routes.js";
 
 const exampleTodo: Todo = {
   id: "5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a",
@@ -128,6 +133,53 @@ describe("parseStatusFilter", () => {
 
   it("rejects a duplicate query param, which Fastify parses as an array", () => {
     const result = parseStatusFilter(["active", "completed"]);
+
+    expect(result.isErr()).toBe(true);
+  });
+});
+
+describe("parseSearchQuery", () => {
+  it("returns undefined when search is omitted", () => {
+    const result = parseSearchQuery(undefined);
+
+    expect(result).toEqual(ok(undefined));
+  });
+
+  it("treats a blank string as undefined", () => {
+    const result = parseSearchQuery("");
+
+    expect(result).toEqual(ok(undefined));
+  });
+
+  it("treats a whitespace-only string as undefined", () => {
+    const result = parseSearchQuery("   ");
+
+    expect(result).toEqual(ok(undefined));
+  });
+
+  it("trims a search term with leading and trailing whitespace", () => {
+    const result = parseSearchQuery("  milestone  ");
+
+    expect(result).toEqual(ok("milestone"));
+  });
+
+  it("rejects a term over the length limit", () => {
+    const result = parseSearchQuery("a".repeat(101));
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.type).toBe("request_validation");
+    }
+  });
+
+  it("accepts a term at the length limit", () => {
+    const result = parseSearchQuery("a".repeat(100));
+
+    expect(result).toEqual(ok("a".repeat(100)));
+  });
+
+  it("rejects a duplicate query param, which Fastify parses as an array", () => {
+    const result = parseSearchQuery(["active", "completed"]);
 
     expect(result.isErr()).toBe(true);
   });
@@ -249,5 +301,91 @@ describe("GET /todos?status=", () => {
 
     expect(response.statusCode).toBe(400);
     expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+  });
+});
+
+describe("GET /todos?search=", () => {
+  let database: DisposableDatabase;
+  let matchingId: string;
+  let nonMatchingId: string;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+
+    const matching = await createTodo(database.db, { title: "Write the milestone plan" });
+    const nonMatching = await createTodo(database.db, { title: "Buy groceries" });
+    if (matching.isErr() || nonMatching.isErr()) throw new Error("setup failed");
+
+    matchingId = matching.value.id;
+    nonMatchingId = nonMatching.value.id;
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("returns only todos whose title matches the search term", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?search=milestone" });
+
+    expect(response.statusCode).toBe(200);
+    const ids = response.json().items.map((todo: Todo) => todo.id);
+    expect(ids).toContain(matchingId);
+    expect(ids).not.toContain(nonMatchingId);
+  });
+
+  it("matches case-insensitively", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?search=MILESTONE" });
+
+    expect(response.statusCode).toBe(200);
+    const ids = response.json().items.map((todo: Todo) => todo.id);
+    expect(ids).toContain(matchingId);
+  });
+
+  it("returns the full unfiltered list when search is blank, same as omitted", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?search=" });
+
+    expect(response.statusCode).toBe(200);
+    const ids = response.json().items.map((todo: Todo) => todo.id);
+    expect(ids).toEqual(expect.arrayContaining([matchingId, nonMatchingId]));
+  });
+
+  it("returns 400 for a search term over the length limit", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({
+      method: "GET",
+      url: `/todos?search=${"a".repeat(101)}`,
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+  });
+
+  it("returns 400 for a duplicate search query param", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({
+      method: "GET",
+      url: "/todos?search=a&search=b",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+  });
+
+  it("combines status and search with AND", async () => {
+    const app = buildApp(database.db);
+    await database.db.update(todos).set({ completed: true }).where(eq(todos.id, matchingId));
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/todos?status=active&search=milestone",
+    });
+
+    expect(response.statusCode).toBe(200);
+    const ids = response.json().items.map((todo: Todo) => todo.id);
+    expect(ids).not.toContain(matchingId);
   });
 });

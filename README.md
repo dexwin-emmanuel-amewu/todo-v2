@@ -18,6 +18,8 @@ Runs the Fastify API on `http://localhost:3000`. Check it's up with `curl http:/
 
 `GET /todos` returns every todo, oldest first (`created_at` ascending, `id` ascending as a tie-breaker). An empty database returns `{ "items": [] }`. Filter with `?status=all|active|completed` (`all` is also the default when omitted). Any other value, or the param repeated more than once, returns 400.
 
+Search titles with `?search=<term>`. The match is a case-insensitive substring, not a prefix. The term is trimmed; a blank or whitespace-only value behaves the same as omitting the param. Terms over 100 characters, or the param repeated more than once, return 400. `search` combines with `status` using AND.
+
 **Frontend**
 
 pnpm --filter web dev (Runs on `http://localhost:5173`.)
