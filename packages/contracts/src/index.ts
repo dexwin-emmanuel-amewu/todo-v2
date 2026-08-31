@@ -23,6 +23,10 @@ export const todoStatusFilterSchema = z.enum(["all", "active", "completed"]);
 
 export type TodoStatusFilter = z.infer<typeof todoStatusFilterSchema>;
 
+export const todoSearchQuerySchema = z.string().trim().max(100);
+
+export type TodoSearchQuery = z.infer<typeof todoSearchQuerySchema>;
+
 export const validationErrorResponseSchema = z.object({
   error: z.object({
     type: z.literal("validation"),
