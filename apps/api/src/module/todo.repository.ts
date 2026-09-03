@@ -4,7 +4,7 @@ import {
   type TodoStatusFilter,
   todoSchema,
 } from "@todo/contracts";
-import { and, asc, eq, ilike } from "drizzle-orm";
+import { and, asc, count, eq, ilike } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { match } from "ts-pattern";
@@ -63,11 +63,24 @@ export function getTodoById(
   });
 }
 
+export type TodoPagination = { page: number; pageSize: number };
+
+export type PaginatedTodos = {
+  items: Todo[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+};
+
+const defaultPagination: TodoPagination = { page: 1, pageSize: 20 };
+
 export function listTodos(
   db: Db,
   filter: TodoStatusFilter = "all",
   search?: string,
-): ResultAsync<Todo[], DatabaseError | ValidationError> {
+  pagination: TodoPagination = defaultPagination,
+): ResultAsync<PaginatedTodos, DatabaseError | ValidationError> {
   const statusCondition = match(filter)
     .with("active", () => eq(todos.completed, false))
     .with("completed", () => eq(todos.completed, true))
@@ -77,21 +90,42 @@ export function listTodos(
   const searchCondition = search ? ilike(todos.title, `%${escapeLikePattern(search)}%`) : undefined;
 
   const condition = and(statusCondition, searchCondition);
+  const offset = (pagination.page - 1) * pagination.pageSize;
 
   return ResultAsync.fromPromise(
-    db.select().from(todos).where(condition).orderBy(asc(todos.createdAt), asc(todos.id)),
+    db.select({ value: count() }).from(todos).where(condition),
     toDatabaseError,
-  ).andThen((rows) => {
-    const result: Todo[] = [];
+  ).andThen((countRows) => {
+    const totalItems = Number(countRows[0]?.value ?? 0);
+    const totalPages = totalItems === 0 ? 0 : Math.ceil(totalItems / pagination.pageSize);
 
-    for (const row of rows) {
-      const validated = toRow(row);
-      if (validated.isErr()) {
-        return err(validated.error);
+    return ResultAsync.fromPromise(
+      db
+        .select()
+        .from(todos)
+        .where(condition)
+        .orderBy(asc(todos.createdAt), asc(todos.id))
+        .limit(pagination.pageSize)
+        .offset(offset),
+      toDatabaseError,
+    ).andThen((rows) => {
+      const result: Todo[] = [];
+
+      for (const row of rows) {
+        const validated = toRow(row);
+        if (validated.isErr()) {
+          return err(validated.error);
+        }
+        result.push(validated.value);
       }
-      result.push(validated.value);
-    }
 
-    return ok(result);
+      return ok({
+        items: result,
+        page: pagination.page,
+        pageSize: pagination.pageSize,
+        totalItems,
+        totalPages,
+      });
+    });
   });
 }
