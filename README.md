@@ -16,9 +16,11 @@ pnpm --filter api dev
 
 Runs the Fastify API on `http://localhost:3000`. Check it's up with `curl http://localhost:3000/health`. Needs Postgres running (pnpm docker:up) and DATABASE_URL set (see .env.example).
 
-`GET /todos` returns every todo, oldest first (`created_at` ascending, `id` ascending as a tie-breaker). An empty database returns `{ "items": [] }`. Filter with `?status=all|active|completed` (`all` is also the default when omitted). Any other value, or the param repeated more than once, returns 400.
+`GET /todos` returns a page of todos, oldest first (`created_at` ascending, `id` ascending as a tie-breaker). Filter with `?status=all|active|completed` (`all` is also the default when omitted). Any other value, or the param repeated more than once, returns 400.
 
 Search titles with `?search=<term>`. The match is a case-insensitive substring, not a prefix. The term is trimmed; a blank or whitespace-only value behaves the same as omitting the param. Terms over 100 characters, or the param repeated more than once, return 400. `search` combines with `status` using AND.
+
+Paginate with `?page=<n>&pageSize=<n>`. `page` defaults to 1, `pageSize` defaults to 20 with a maximum of 100. Both must be positive integers; anything else, an out-of-range value, or a repeated param, returns 400. A page beyond the last one returns 200 with an empty `items` array rather than an error. The response body is `{ "items": Todo[], "page": number, "pageSize": number, "totalItems": number, "totalPages": number }`, where `totalItems`/`totalPages` reflect the current `status`/`search` filters. An empty database returns `{ "items": [], "page": 1, "pageSize": 20, "totalItems": 0, "totalPages": 0 }`.
 
 **Frontend**
 

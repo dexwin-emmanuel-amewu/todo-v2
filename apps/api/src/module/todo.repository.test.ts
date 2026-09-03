@@ -39,7 +39,7 @@ describe("todos repository", () => {
     const listed = await listTodos(database.db);
     if (listed.isErr()) throw listed.error;
 
-    expect(listed.value.length).toBeGreaterThanOrEqual(2);
+    expect(listed.value.items.length).toBeGreaterThanOrEqual(2);
   });
 
   it("returns a not-found error for a missing id", async () => {
@@ -64,7 +64,7 @@ describe("todos repository", () => {
     const listed = await listTodos(database.db);
     if (listed.isErr()) throw listed.error;
 
-    const ids = listed.value.map((todo) => todo.id);
+    const ids = listed.value.items.map((todo) => todo.id);
     expect(ids.indexOf(first.value.id)).toBeLessThan(ids.indexOf(second.value.id));
   });
 });
@@ -97,7 +97,7 @@ describe("todos repository, createdAt ties", () => {
     const listed = await listTodos(database.db);
     if (listed.isErr()) throw listed.error;
 
-    expect(listed.value.map((todo) => todo.id)).toEqual(expectedIds);
+    expect(listed.value.items.map((todo) => todo.id)).toEqual(expectedIds);
   });
 });
 
@@ -125,10 +125,10 @@ describe("todos repository, status filter", () => {
     const listed = await listTodos(database.db, "active");
     if (listed.isErr()) throw listed.error;
 
-    const ids = listed.value.map((todo) => todo.id);
+    const ids = listed.value.items.map((todo) => todo.id);
     expect(ids).toContain(active.value.id);
     expect(ids).not.toContain(completed.value.id);
-    expect(listed.value.every((todo) => todo.completed === false)).toBe(true);
+    expect(listed.value.items.every((todo) => todo.completed === false)).toBe(true);
   });
 
   it("filters to only completed todos", async () => {
@@ -143,10 +143,10 @@ describe("todos repository, status filter", () => {
     const listed = await listTodos(database.db, "completed");
     if (listed.isErr()) throw listed.error;
 
-    const ids = listed.value.map((todo) => todo.id);
+    const ids = listed.value.items.map((todo) => todo.id);
     expect(ids).toContain(completed.value.id);
     expect(ids).not.toContain(active.value.id);
-    expect(listed.value.every((todo) => todo.completed === true)).toBe(true);
+    expect(listed.value.items.every((todo) => todo.completed === true)).toBe(true);
   });
 
   it("returns every todo for the all filter, same as no filter", async () => {
@@ -177,7 +177,7 @@ describe("todos repository, search", () => {
     const listed = await listTodos(database.db, "all", "mile");
     if (listed.isErr()) throw listed.error;
 
-    expect(listed.value.map((todo) => todo.id)).toContain(created.value.id);
+    expect(listed.value.items.map((todo) => todo.id)).toContain(created.value.id);
   });
 
   it("matches regardless of case", async () => {
@@ -187,14 +187,15 @@ describe("todos repository, search", () => {
     const listed = await listTodos(database.db, "all", "MILE");
     if (listed.isErr()) throw listed.error;
 
-    expect(listed.value.map((todo) => todo.id)).toContain(created.value.id);
+    expect(listed.value.items.map((todo) => todo.id)).toContain(created.value.id);
   });
 
   it("returns an empty array when nothing matches", async () => {
     const listed = await listTodos(database.db, "all", "zzz-no-match-anywhere");
     if (listed.isErr()) throw listed.error;
 
-    expect(listed.value).toEqual([]);
+    expect(listed.value.items).toEqual([]);
+    expect(listed.value.totalItems).toBe(0);
   });
 
   it("behaves exactly like no search when search is undefined", async () => {
@@ -213,7 +214,7 @@ describe("todos repository, search", () => {
     const listed = await listTodos(database.db, "all", "100% done_deal");
     if (listed.isErr()) throw listed.error;
 
-    const ids = listed.value.map((todo) => todo.id);
+    const ids = listed.value.items.map((todo) => todo.id);
     expect(ids).toContain(literal.value.id);
     expect(ids).not.toContain(unrelated.value.id);
   });
@@ -230,9 +231,100 @@ describe("todos repository, search", () => {
     const listed = await listTodos(database.db, "active", "ship the search");
     if (listed.isErr()) throw listed.error;
 
-    const ids = listed.value.map((todo) => todo.id);
+    const ids = listed.value.items.map((todo) => todo.id);
     expect(ids).toContain(activeMatch.value.id);
     expect(ids).not.toContain(completedMatch.value.id);
+  });
+});
+
+describe("todos repository, pagination", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("returns the first page in sort order, with correct totals", async () => {
+    for (let index = 0; index < 5; index += 1) {
+      await createTodo(database.db, { title: `Pagination todo ${index}` });
+    }
+
+    const listed = await listTodos(database.db, "all", undefined, { page: 1, pageSize: 2 });
+    if (listed.isErr()) throw listed.error;
+
+    expect(listed.value.items.length).toBe(2);
+    expect(listed.value.page).toBe(1);
+    expect(listed.value.pageSize).toBe(2);
+    expect(listed.value.totalItems).toBe(5);
+    expect(listed.value.totalPages).toBe(3);
+  });
+
+  it("returns the requested middle page", async () => {
+    const all = await listTodos(database.db, "all", undefined, { page: 1, pageSize: 100 });
+    if (all.isErr()) throw all.error;
+    const expectedIds = all.value.items.slice(2, 4).map((todo) => todo.id);
+
+    const listed = await listTodos(database.db, "all", undefined, { page: 2, pageSize: 2 });
+    if (listed.isErr()) throw listed.error;
+
+    expect(listed.value.items.map((todo) => todo.id)).toEqual(expectedIds);
+    expect(listed.value.page).toBe(2);
+  });
+
+  it("returns a partial last page", async () => {
+    const listed = await listTodos(database.db, "all", undefined, { page: 3, pageSize: 2 });
+    if (listed.isErr()) throw listed.error;
+
+    expect(listed.value.items.length).toBe(1);
+    expect(listed.value.totalPages).toBe(3);
+  });
+
+  it("returns an empty items array for a page beyond the last page, with accurate totals", async () => {
+    const listed = await listTodos(database.db, "all", undefined, { page: 4, pageSize: 2 });
+    if (listed.isErr()) throw listed.error;
+
+    expect(listed.value.items).toEqual([]);
+    expect(listed.value.totalItems).toBe(5);
+    expect(listed.value.totalPages).toBe(3);
+  });
+
+  it("paginates only over the status-filtered set", async () => {
+    await database.db.update(todos).set({ completed: true });
+    const active = await createTodo(database.db, { title: "Only active pagination todo" });
+    if (active.isErr()) throw new Error("setup failed");
+
+    const listed = await listTodos(database.db, "active", undefined, { page: 1, pageSize: 20 });
+    if (listed.isErr()) throw listed.error;
+
+    expect(listed.value.totalItems).toBe(1);
+    expect(listed.value.items.map((todo) => todo.id)).toEqual([active.value.id]);
+  });
+});
+
+describe("todos repository, empty pagination", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("returns totalPages 0 for an empty table", async () => {
+    const listed = await listTodos(database.db);
+    if (listed.isErr()) throw listed.error;
+
+    expect(listed.value.items).toEqual([]);
+    expect(listed.value.totalItems).toBe(0);
+    expect(listed.value.totalPages).toBe(0);
   });
 });
 
@@ -252,6 +344,6 @@ describe("todos repository, empty database", () => {
     const listed = await listTodos(database.db);
     if (listed.isErr()) throw listed.error;
 
-    expect(listed.value).toEqual([]);
+    expect(listed.value.items).toEqual([]);
   });
 });
