@@ -4,15 +4,18 @@ import {
   type TodoListResponse,
   type TodoStatusFilter,
   todoListResponseSchema,
+  todoPageQuerySchema,
+  todoPageSizeQuerySchema,
   todoSearchQuerySchema,
   todoStatusFilterSchema,
 } from "@todo/contracts";
 import type { FastifyInstance } from "fastify";
 import { err, ok, type Result } from "neverthrow";
 import { match } from "ts-pattern";
+import type { z } from "zod";
 
 import type { DatabaseError, ValidationError } from "../db/errors.js";
-import type { Db } from "./todo.repository.js";
+import type { Db, PaginatedTodos, TodoPagination } from "./todo.repository.js";
 import { listTodos } from "./todo.repository.js";
 import { createTodoFlow, type RequestValidationError } from "./todo.service.js";
 
@@ -39,13 +42,13 @@ type ListTodosResponse =
   { status: 200; body: TodoListResponse } | { status: 500; body: InternalErrorResponse };
 
 export function toListTodosResponse(
-  result: Result<Todo[], DatabaseError | ValidationError>,
+  result: Result<PaginatedTodos, DatabaseError | ValidationError>,
 ): ListTodosResponse {
   if (result.isErr()) {
     return { status: 500, body: internalErrorBody };
   }
 
-  const body: TodoListResponse = { items: result.value };
+  const body: TodoListResponse = result.value;
   const validated = todoListResponseSchema.safeParse(body);
 
   if (!validated.success) {
@@ -101,6 +104,59 @@ export function parseSearchQuery(
     });
 }
 
+const defaultPage = 1;
+const defaultPageSize = 20;
+
+function parsePaginationField(
+  rawValue: unknown,
+  defaultValue: number,
+  schema: z.ZodType<number>,
+): Result<number, QueryValidationError> {
+  return match(rawValue)
+    .with(undefined, (): Result<number, QueryValidationError> => ok(defaultValue))
+    .otherwise((value) => {
+      if (typeof value !== "string") {
+        return err<number, QueryValidationError>({
+          type: "request_validation",
+          issues: ["expected a single value"],
+        });
+      }
+
+      const parsed = schema.safeParse(value);
+
+      return match(parsed)
+        .with({ success: true }, ({ data }): Result<number, QueryValidationError> => ok(data))
+        .with({ success: false }, ({ error }): Result<number, QueryValidationError> =>
+          err({
+            type: "request_validation",
+            issues: error.issues.map((issue) => issue.message),
+          }),
+        )
+        .exhaustive();
+    });
+}
+
+export function parsePagination(
+  rawPage: unknown,
+  rawPageSize: unknown,
+): Result<TodoPagination, QueryValidationError> {
+  const pageResult = parsePaginationField(rawPage, defaultPage, todoPageQuerySchema);
+  if (pageResult.isErr()) {
+    return err(pageResult.error);
+  }
+
+  const pageSizeResult = parsePaginationField(
+    rawPageSize,
+    defaultPageSize,
+    todoPageSizeQuerySchema,
+  );
+  if (pageSizeResult.isErr()) {
+    return err(pageSizeResult.error);
+  }
+
+  return ok({ page: pageResult.value, pageSize: pageSizeResult.value });
+}
+
 export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
   app.post("/todos", async (request, reply) => {
     const result = await createTodoFlow(db, request.body);
@@ -114,9 +170,15 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
   });
 
   app.get("/todos", async (request, reply) => {
-    const query = request.query as { status?: unknown; search?: unknown };
+    const query = request.query as {
+      status?: unknown;
+      search?: unknown;
+      page?: unknown;
+      pageSize?: unknown;
+    };
     const filterResult = parseStatusFilter(query.status);
     const searchResult = parseSearchQuery(query.search);
+    const paginationResult = parsePagination(query.page, query.pageSize);
 
     if (filterResult.isErr()) {
       return reply
@@ -130,7 +192,18 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
         .send({ error: { type: "validation", issues: searchResult.error.issues } });
     }
 
-    const result = await listTodos(db, filterResult.value, searchResult.value);
+    if (paginationResult.isErr()) {
+      return reply
+        .status(400)
+        .send({ error: { type: "validation", issues: paginationResult.error.issues } });
+    }
+
+    const result = await listTodos(
+      db,
+      filterResult.value,
+      searchResult.value,
+      paginationResult.value,
+    );
     const { status, body } = toListTodosResponse(result);
     return reply.status(status).send(body);
   });
