@@ -6,7 +6,7 @@ import { createTodo, type Db } from "./todo.repository.js";
 
 export type RequestValidationError = { type: "request_validation"; issues: string[] };
 
-export function createTodoFlow(
+export function createTodoService(
   db: Db,
   rawInput: unknown,
 ): ResultAsync<Todo, RequestValidationError | ValidationError | DatabaseError> {

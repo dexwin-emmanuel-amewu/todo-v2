@@ -20,7 +20,7 @@ import type { z } from "zod";
 import type { DatabaseError, NotFoundError, ValidationError } from "../db/errors.js";
 import type { Db, PaginatedTodos, TodoPagination } from "./todo.repository.js";
 import { getTodoById, listTodos } from "./todo.repository.js";
-import { createTodoFlow, type RequestValidationError } from "./todo.service.js";
+import { createTodoService, type RequestValidationError } from "./todo.service.js";
 
 const internalErrorBody: InternalErrorResponse = { error: { type: "internal" } };
 const notFoundErrorBody: NotFoundErrorResponse = { error: { type: "not_found" } };
@@ -202,10 +202,14 @@ export function toGetTodoResponse(
 
 export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
   app.post("/todos", async (request, reply) => {
-    const result = await createTodoFlow(db, request.body);
+    const result = await createTodoService(db, request.body);
 
     if (result.isErr() && result.error.type !== "request_validation") {
-      request.log.error({ err: result.error }, "POST /todos failed");
+      const message =
+        result.error.type === "validation"
+          ? "POST /todos: stored row failed validation"
+          : "POST /todos: database error";
+      request.log.error({ err: result.error }, message);
     }
 
     const { status, body } = toCreateTodoResponse(result);
@@ -247,6 +251,15 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
       searchResult.value,
       paginationResult.value,
     );
+
+    if (result.isErr()) {
+      const message =
+        result.error.type === "validation"
+          ? "GET /todos: stored row failed validation"
+          : "GET /todos: database error";
+      request.log.error({ err: result.error }, message);
+    }
+
     const { status, body } = toListTodosResponse(result);
     return reply.status(status).send(body);
   });
@@ -264,7 +277,11 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
     const result = await getTodoById(db, idResult.value);
 
     if (result.isErr() && result.error.type !== "not_found") {
-      request.log.error({ err: result.error }, "GET /todos/:todoId failed");
+      const message =
+        result.error.type === "validation"
+          ? "GET /todos/:todoId: stored row failed validation"
+          : "GET /todos/:todoId: database error";
+      request.log.error({ err: result.error }, message);
     }
 
     const { status, body } = toGetTodoResponse(result);
