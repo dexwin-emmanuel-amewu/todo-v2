@@ -667,7 +667,7 @@ describe("replaceTodoFlow", () => {
     const created = await createTodo(database.db, { title: "Original title" });
     if (created.isErr()) throw created.error;
 
-    const result = await replaceTodoService(database.db, created.value.id, {
+    const result = await replaceTodoFlow(database.db, created.value.id, {
       title: "Updated title",
       completed: true,
     });
@@ -683,7 +683,7 @@ describe("replaceTodoFlow", () => {
     const created = await createTodo(database.db, { title: "Should stay unchanged" });
     if (created.isErr()) throw created.error;
 
-    const result = await replaceTodoService(database.db, created.value.id, { title: "New title" });
+    const result = await replaceTodoFlow(database.db, created.value.id, { title: "New title" });
 
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
