@@ -1,8 +1,8 @@
-import { createTodoSchema, type Todo } from "@todo/contracts";
+import { createTodoSchema, replaceTodoSchema, type Todo } from "@todo/contracts";
 import { errAsync, type ResultAsync } from "neverthrow";
 
-import type { DatabaseError, ValidationError } from "../db/errors.js";
-import { createTodo, type Db } from "./todo.repository.js";
+import type { DatabaseError, NotFoundError, ValidationError } from "../db/errors.js";
+import { createTodo, type Db, replaceTodoById } from "./todo.repository.js";
 
 export type RequestValidationError = { type: "request_validation"; issues: string[] };
 
@@ -20,4 +20,21 @@ export function createTodoFlow(
   }
 
   return createTodo(db, parsed.data);
+}
+
+export function replaceTodoFlow(
+  db: Db,
+  id: string,
+  rawInput: unknown,
+): ResultAsync<Todo, RequestValidationError | NotFoundError | ValidationError | DatabaseError> {
+  const parsed = replaceTodoSchema.safeParse(rawInput);
+
+  if (!parsed.success) {
+    return errAsync({
+      type: "request_validation",
+      issues: parsed.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  return replaceTodoById(db, id, parsed.data);
 }
