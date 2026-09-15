@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   notFoundErrorResponseSchema,
+  replaceTodoSchema,
   todoIdParamSchema,
   todoSchema,
   todoSearchQuerySchema,
@@ -54,6 +55,52 @@ describe("todoSearchQuerySchema", () => {
 
   it("rejects an array, the shape a duplicate query param takes", () => {
     expect(todoSearchQuerySchema.safeParse(["a", "b"]).success).toBe(false);
+  });
+});
+
+describe("replaceTodoSchema", () => {
+  it("accepts a valid title and completed", () => {
+    expect(replaceTodoSchema.safeParse({ title: "Buy oat milk", completed: false }).success).toBe(
+      true,
+    );
+  });
+
+  it("rejects a missing title", () => {
+    expect(replaceTodoSchema.safeParse({ completed: false }).success).toBe(false);
+  });
+
+  it("rejects a missing completed", () => {
+    expect(replaceTodoSchema.safeParse({ title: "Buy oat milk" }).success).toBe(false);
+  });
+
+  it("rejects a title under 6 characters after trimming", () => {
+    expect(replaceTodoSchema.safeParse({ title: "hi", completed: false }).success).toBe(false);
+  });
+
+  it("rejects a title over 100 characters", () => {
+    expect(replaceTodoSchema.safeParse({ title: "a".repeat(101), completed: false }).success).toBe(
+      false,
+    );
+  });
+
+  it("rejects a completed value that isn't a boolean", () => {
+    expect(replaceTodoSchema.safeParse({ title: "Buy oat milk", completed: "true" }).success).toBe(
+      false,
+    );
+  });
+
+  it("strips an extra id and createdAt instead of rejecting the body", () => {
+    const result = replaceTodoSchema.safeParse({
+      title: "Buy oat milk",
+      completed: false,
+      id: "5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a",
+      createdAt: new Date().toISOString(),
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ title: "Buy oat milk", completed: false });
+    }
   });
 });
 
