@@ -1,11 +1,14 @@
 import {
   type InternalErrorResponse,
+  type NotFoundErrorResponse,
   type Todo,
   type TodoListResponse,
   type TodoStatusFilter,
+  todoIdParamSchema,
   todoListResponseSchema,
   todoPageQuerySchema,
   todoPageSizeQuerySchema,
+  todoSchema,
   todoSearchQuerySchema,
   todoStatusFilterSchema,
 } from "@todo/contracts";
@@ -14,12 +17,22 @@ import { err, ok, type Result } from "neverthrow";
 import { match } from "ts-pattern";
 import type { z } from "zod";
 
-import type { DatabaseError, ValidationError } from "../db/errors.js";
+import type { DatabaseError, NotFoundError, ValidationError } from "../db/errors.js";
 import type { Db, PaginatedTodos, TodoPagination } from "./todo.repository.js";
-import { listTodos } from "./todo.repository.js";
-import { createTodoFlow, type RequestValidationError } from "./todo.service.js";
+import { getTodoById, listTodos } from "./todo.repository.js";
+<<<<<<< Updated upstream
+import { createTodoService, type RequestValidationError } from "./todo.service.js";
+=======
+import {
+  createTodoService,
+  patchTodoService,
+  replaceTodoService,
+  type RequestValidationError,
+} from "./todo.service.js";
+>>>>>>> Stashed changes
 
 const internalErrorBody: InternalErrorResponse = { error: { type: "internal" } };
+const notFoundErrorBody: NotFoundErrorResponse = { error: { type: "not_found" } };
 
 export function toCreateTodoResponse(
   result: Result<Todo, RequestValidationError | ValidationError | DatabaseError>,
@@ -157,12 +170,55 @@ export function parsePagination(
   return ok({ page: pageResult.value, pageSize: pageSizeResult.value });
 }
 
+export function parseTodoId(rawId: unknown): Result<string, QueryValidationError> {
+  const parsed = todoIdParamSchema.safeParse(rawId);
+
+  return match(parsed)
+    .with({ success: true }, ({ data }): Result<string, QueryValidationError> => ok(data))
+    .with({ success: false }, ({ error }): Result<string, QueryValidationError> =>
+      err({
+        type: "request_validation",
+        issues: error.issues.map((issue) => issue.message),
+      }),
+    )
+    .exhaustive();
+}
+
+type GetTodoResponse =
+  | { status: 200; body: Todo }
+  | { status: 404; body: NotFoundErrorResponse }
+  | { status: 500; body: InternalErrorResponse };
+
+export function toGetTodoResponse(
+  result: Result<Todo, NotFoundError | ValidationError | DatabaseError>,
+): GetTodoResponse {
+  if (result.isOk()) {
+    const validated = todoSchema.safeParse(result.value);
+
+    return validated.success
+      ? { status: 200, body: validated.data }
+      : { status: 500, body: internalErrorBody };
+  }
+
+  return match(result.error)
+    .with({ type: "not_found" }, (): GetTodoResponse => ({ status: 404, body: notFoundErrorBody }))
+    .with({ type: "validation" }, { type: "database" }, (): GetTodoResponse => ({
+      status: 500,
+      body: internalErrorBody,
+    }))
+    .exhaustive();
+}
+
 export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
   app.post("/todos", async (request, reply) => {
-    const result = await createTodoFlow(db, request.body);
+    const result = await createTodoService(db, request.body);
 
     if (result.isErr() && result.error.type !== "request_validation") {
-      request.log.error({ err: result.error }, "POST /todos failed");
+      const message =
+        result.error.type === "validation"
+          ? "POST /todos: stored row failed validation"
+          : "POST /todos: database error";
+      request.log.error({ err: result.error }, message);
     }
 
     const { status, body } = toCreateTodoResponse(result);
@@ -204,7 +260,91 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
       searchResult.value,
       paginationResult.value,
     );
+
+    if (result.isErr()) {
+      const message =
+        result.error.type === "validation"
+          ? "GET /todos: stored row failed validation"
+          : "GET /todos: database error";
+      request.log.error({ err: result.error }, message);
+    }
+
     const { status, body } = toListTodosResponse(result);
     return reply.status(status).send(body);
   });
+
+  app.get("/todos/:todoId", async (request, reply) => {
+    const params = request.params as { todoId?: unknown };
+    const idResult = parseTodoId(params.todoId);
+
+    if (idResult.isErr()) {
+      return reply
+        .status(400)
+        .send({ error: { type: "validation", issues: idResult.error.issues } });
+    }
+
+    const result = await getTodoById(db, idResult.value);
+
+    if (result.isErr() && result.error.type !== "not_found") {
+      const message =
+        result.error.type === "validation"
+          ? "GET /todos/:todoId: stored row failed validation"
+          : "GET /todos/:todoId: database error";
+      request.log.error({ err: result.error }, message);
+    }
+
+    const { status, body } = toGetTodoResponse(result);
+    return reply.status(status).send(body);
+  });
+<<<<<<< Updated upstream
+=======
+
+  app.put("/todos/:todoId", async (request, reply) => {
+    const params = request.params as { todoId?: unknown };
+    const idResult = parseTodoId(params.todoId);
+
+    if (idResult.isErr()) {
+      return reply
+        .status(400)
+        .send({ error: { type: "validation", issues: idResult.error.issues } });
+    }
+
+    const result = await replaceTodoService(db, idResult.value, request.body);
+
+    if (
+      result.isErr() &&
+      result.error.type !== "request_validation" &&
+      result.error.type !== "not_found"
+    ) {
+      request.log.error({ err: result.error }, "PUT /todos/:todoId failed");
+    }
+
+    const { status, body } = toReplaceTodoResponse(result);
+    return reply.status(status).send(body);
+  });
+
+  app.patch("/todos/:todoId", async (request, reply) => {
+    const params = request.params as { todoId?: unknown };
+    const idResult = parseTodoId(params.todoId);
+
+    if (idResult.isErr()) {
+      return reply
+        .status(400)
+        .send({ error: { type: "validation", issues: idResult.error.issues } });
+    }
+
+    const result = await patchTodoService(db, idResult.value, request.body);
+
+    if (
+      result.isErr() &&
+      result.error.type !== "request_validation" &&
+      result.error.type !== "not_found"
+    ) {
+      request.log.error({ err: result.error }, "PATCH /todos/:todoId failed");
+    }
+
+    const { status, body } = toPatchTodoResponse(result);
+    return reply.status(status).send(body);
+  });
+>>>>>>> Stashed changes
 }
