@@ -8,7 +8,13 @@ import {
   dropDisposableDatabase,
   migrateDisposableDatabase,
 } from "../db/test-db";
-import { createTodo, getTodoById, listTodos, replaceTodoById } from "../module/todo.repository.js";
+import {
+  createTodo,
+  getTodoById,
+  listTodos,
+  patchTodoById,
+  replaceTodoById,
+} from "../module/todo.repository.js";
 
 describe("todos repository", () => {
   let database: DisposableDatabase;
@@ -421,6 +427,119 @@ describe("todos repository, replaceTodoById", () => {
       completed: true,
     });
     if (replaced.isErr()) throw replaced.error;
+
+    const untouched = await getTodoById(database.db, other.value.id);
+    if (untouched.isErr()) throw untouched.error;
+
+    expect(untouched.value).toEqual(other.value);
+  });
+});
+
+describe("todos repository, patchTodoById", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("updates only title, leaving completed unchanged", async () => {
+    const created = await createTodo(database.db, { title: "Original title" });
+    if (created.isErr()) throw created.error;
+
+    const patched = await patchTodoById(database.db, created.value.id, { title: "New title" });
+    if (patched.isErr()) throw patched.error;
+
+    expect(patched.value.title).toBe("New title");
+    expect(patched.value.completed).toBe(created.value.completed);
+  });
+
+  it("updates only completed, leaving title unchanged", async () => {
+    const created = await createTodo(database.db, { title: "Keep this title" });
+    if (created.isErr()) throw created.error;
+
+    const patched = await patchTodoById(database.db, created.value.id, { completed: true });
+    if (patched.isErr()) throw patched.error;
+
+    expect(patched.value.completed).toBe(true);
+    expect(patched.value.title).toBe(created.value.title);
+  });
+
+  it("updates both title and completed when both are supplied", async () => {
+    const created = await createTodo(database.db, { title: "Original title" });
+    if (created.isErr()) throw created.error;
+
+    const patched = await patchTodoById(database.db, created.value.id, {
+      title: "New title",
+      completed: true,
+    });
+    if (patched.isErr()) throw patched.error;
+
+    expect(patched.value.title).toBe("New title");
+    expect(patched.value.completed).toBe(true);
+  });
+
+  it("leaves id and createdAt unchanged", async () => {
+    const created = await createTodo(database.db, { title: "Keep my id and createdAt" });
+    if (created.isErr()) throw created.error;
+
+    const patched = await patchTodoById(database.db, created.value.id, { title: "New title" });
+    if (patched.isErr()) throw patched.error;
+
+    expect(patched.value.id).toBe(created.value.id);
+    expect(patched.value.createdAt).toBe(created.value.createdAt);
+  });
+
+  it("changes updated_at to a later timestamp, even for a single-field patch", async () => {
+    const created = await createTodo(database.db, { title: "Check updated_at bumps" });
+    if (created.isErr()) throw created.error;
+
+    const before = await database.db
+      .select({ updatedAt: todos.updatedAt })
+      .from(todos)
+      .where(eq(todos.id, created.value.id));
+
+    const patched = await patchTodoById(database.db, created.value.id, { completed: true });
+    if (patched.isErr()) throw patched.error;
+
+    const after = await database.db
+      .select({ updatedAt: todos.updatedAt })
+      .from(todos)
+      .where(eq(todos.id, created.value.id));
+
+    expect(after[0]!.updatedAt.getTime()).toBeGreaterThan(before[0]!.updatedAt.getTime());
+  });
+
+  it("returns not_found for a random unused id and does not insert a row", async () => {
+    const unusedId = "00000000-0000-0000-0000-000000000000";
+    const before = await listTodos(database.db);
+    if (before.isErr()) throw before.error;
+
+    const result = await patchTodoById(database.db, unusedId, { title: "Should not be created" });
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error).toEqual({ type: "not_found", id: unusedId });
+    }
+
+    const after = await listTodos(database.db);
+    if (after.isErr()) throw after.error;
+    expect(after.value.totalItems).toBe(before.value.totalItems);
+  });
+
+  it("updates only the targeted row, leaving the other todo unchanged", async () => {
+    const target = await createTodo(database.db, { title: "Target todo" });
+    const other = await createTodo(database.db, { title: "Untouched todo" });
+    if (target.isErr() || other.isErr()) throw new Error("setup failed");
+
+    const patched = await patchTodoById(database.db, target.value.id, {
+      title: "Target todo, patched",
+    });
+    if (patched.isErr()) throw patched.error;
 
     const untouched = await getTodoById(database.db, other.value.id);
     if (untouched.isErr()) throw untouched.error;

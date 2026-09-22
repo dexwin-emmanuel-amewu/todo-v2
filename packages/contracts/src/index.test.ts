@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   notFoundErrorResponseSchema,
+  patchTodoSchema,
   replaceTodoSchema,
   todoIdParamSchema,
   todoSchema,
@@ -101,6 +102,62 @@ describe("replaceTodoSchema", () => {
     if (result.success) {
       expect(result.data).toEqual({ title: "Buy oat milk", completed: false });
     }
+  });
+});
+
+describe("patchTodoSchema", () => {
+  it("accepts a title alone", () => {
+    expect(patchTodoSchema.safeParse({ title: "Buy oat milk" }).success).toBe(true);
+  });
+
+  it("accepts a completed value alone", () => {
+    expect(patchTodoSchema.safeParse({ completed: true }).success).toBe(true);
+  });
+
+  it("accepts both title and completed together", () => {
+    expect(patchTodoSchema.safeParse({ title: "Buy oat milk", completed: true }).success).toBe(
+      true,
+    );
+  });
+
+  it("rejects an empty object", () => {
+    expect(patchTodoSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("rejects a body containing only unrecognized fields, the same as an empty body", () => {
+    expect(patchTodoSchema.safeParse({ notes: "x" }).success).toBe(false);
+  });
+
+  it("rejects a title under 6 characters after trimming, when title is present", () => {
+    expect(patchTodoSchema.safeParse({ title: "hi" }).success).toBe(false);
+  });
+
+  it("rejects a title over 100 characters, when title is present", () => {
+    expect(patchTodoSchema.safeParse({ title: "a".repeat(101) }).success).toBe(false);
+  });
+
+  it("rejects a completed value that isn't a boolean, when completed is present", () => {
+    expect(patchTodoSchema.safeParse({ completed: "true" }).success).toBe(false);
+  });
+
+  it("strips an extra id and createdAt but still accepts the body when title is also present", () => {
+    const result = patchTodoSchema.safeParse({
+      title: "Buy oat milk",
+      id: "5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a",
+      createdAt: new Date().toISOString(),
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ title: "Buy oat milk" });
+    }
+  });
+
+  it("accepts a title-only body that replaceTodoSchema rejects for missing completed", () => {
+    const body = { title: "Buy oat milk" };
+
+    expect(patchTodoSchema.safeParse(body).success).toBe(true);
+    expect(replaceTodoSchema.safeParse(body).success).toBe(false);
   });
 });
 

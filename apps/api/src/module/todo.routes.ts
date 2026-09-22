@@ -238,6 +238,39 @@ export function toReplaceTodoResponse(
     .exhaustive();
 }
 
+type PatchTodoResponse =
+  | { status: 200; body: Todo }
+  | { status: 400; body: { error: { type: "validation"; issues: string[] } } }
+  | { status: 404; body: NotFoundErrorResponse }
+  | { status: 500; body: InternalErrorResponse };
+
+export function toPatchTodoResponse(
+  result: Result<Todo, RequestValidationError | NotFoundError | ValidationError | DatabaseError>,
+): PatchTodoResponse {
+  if (result.isOk()) {
+    const validated = todoSchema.safeParse(result.value);
+
+    return validated.success
+      ? { status: 200, body: validated.data }
+      : { status: 500, body: internalErrorBody };
+  }
+
+  return match(result.error)
+    .with({ type: "request_validation" }, ({ issues }): PatchTodoResponse => ({
+      status: 400,
+      body: { error: { type: "validation", issues } },
+    }))
+    .with({ type: "not_found" }, (): PatchTodoResponse => ({
+      status: 404,
+      body: notFoundErrorBody,
+    }))
+    .with({ type: "validation" }, { type: "database" }, (): PatchTodoResponse => ({
+      status: 500,
+      body: internalErrorBody,
+    }))
+    .exhaustive();
+}
+
 export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
   app.post("/todos", async (request, reply) => {
     const result = await createTodoService(db, request.body);
@@ -281,21 +314,6 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
       return reply
         .status(400)
         .send({ error: { type: "validation", issues: paginationResult.error.issues } });
-    }
-
-    const result = await listTodos(
-      db,
-      filterResult.value,
-      searchResult.value,
-      paginationResult.value,
-    );
-
-    if (result.isErr()) {
-      const message =
-        result.error.type === "validation"
-          ? "GET /todos: stored row failed validation"
-          : "GET /todos: database error";
-      request.log.error({ err: result.error }, message);
     }
 
     const result = await listTodos(
