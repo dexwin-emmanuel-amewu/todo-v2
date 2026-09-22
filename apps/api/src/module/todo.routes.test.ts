@@ -18,7 +18,12 @@ import {
   migrateDisposableDatabase,
 } from "../db/test-db";
 import { buildApp } from "./app.js";
+<<<<<<< Updated upstream
 import { createTodo } from "./todo.repository.js";
+=======
+import { createTodo, getTodoById } from "./todo.repository.js";
+import { patchTodoService, replaceTodoService } from "./todo.service.js";
+>>>>>>> Stashed changes
 import {
   parsePagination,
   parseSearchQuery,
@@ -608,6 +613,176 @@ describe("toGetTodoResponse", () => {
   });
 });
 
+<<<<<<< Updated upstream
+=======
+describe("toReplaceTodoResponse", () => {
+  it("maps a successful replace to 200 with the updated todo", () => {
+    const response = toReplaceTodoResponse(ok(exampleTodo));
+
+    expect(response.status).toBe(200);
+    expect(todoSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it("maps a request-body validation error to 400", () => {
+    const response = toReplaceTodoResponse(
+      err({ type: "request_validation", issues: ["Missing completed"] }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it("maps a not-found error to 404 without echoing the id", () => {
+    const response = toReplaceTodoResponse(err({ type: "not_found", id: exampleTodo.id }));
+
+    expect(response.status).toBe(404);
+    expect(notFoundErrorResponseSchema.safeParse(response.body).success).toBe(true);
+    expect(JSON.stringify(response.body)).not.toContain(exampleTodo.id);
+  });
+
+  it("maps a database error to 500", () => {
+    const response = toReplaceTodoResponse(err({ type: "database", cause: new Error("boom") }));
+
+    expect(response.status).toBe(500);
+    expect(internalErrorResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it("maps a stored-row validation error to 500, not 200 and not 404", () => {
+    const response = toReplaceTodoResponse(err({ type: "validation", issues: ["bad row"] }));
+
+    expect(response.status).toBe(500);
+    expect(internalErrorResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+});
+
+describe("replaceTodoService", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("calls through to the repository and resolves ok with the updated todo", async () => {
+    const created = await createTodo(database.db, { title: "Original title" });
+    if (created.isErr()) throw created.error;
+
+    const result = await replaceTodoService(database.db, created.value.id, {
+      title: "Updated title",
+      completed: true,
+    });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.title).toBe("Updated title");
+      expect(result.value.completed).toBe(true);
+    }
+  });
+
+  it("never reaches the repository for an invalid body", async () => {
+    const created = await createTodo(database.db, { title: "Should stay unchanged" });
+    if (created.isErr()) throw created.error;
+
+    const result = await replaceTodoService(database.db, created.value.id, { title: "New title" });
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.type).toBe("request_validation");
+    }
+
+    const unchanged = await getTodoById(database.db, created.value.id);
+    if (unchanged.isErr()) throw unchanged.error;
+    expect(unchanged.value).toEqual(created.value);
+  });
+});
+
+describe("toPatchTodoResponse", () => {
+  it("maps a successful patch to 200 with the updated todo", () => {
+    const response = toPatchTodoResponse(ok(exampleTodo));
+
+    expect(response.status).toBe(200);
+    expect(todoSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it("maps a request-body validation error to 400", () => {
+    const response = toPatchTodoResponse(
+      err({ type: "request_validation", issues: ["At least one field must be provided"] }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it("maps a not-found error to 404 without echoing the id", () => {
+    const response = toPatchTodoResponse(err({ type: "not_found", id: exampleTodo.id }));
+
+    expect(response.status).toBe(404);
+    expect(notFoundErrorResponseSchema.safeParse(response.body).success).toBe(true);
+    expect(JSON.stringify(response.body)).not.toContain(exampleTodo.id);
+  });
+
+  it("maps a database error to 500", () => {
+    const response = toPatchTodoResponse(err({ type: "database", cause: new Error("boom") }));
+
+    expect(response.status).toBe(500);
+    expect(internalErrorResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it("maps a stored-row validation error to 500, not 200 and not 404", () => {
+    const response = toPatchTodoResponse(err({ type: "validation", issues: ["bad row"] }));
+
+    expect(response.status).toBe(500);
+    expect(internalErrorResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+});
+
+describe("patchTodoService", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("calls through to the repository and resolves ok with the updated todo, completed unchanged", async () => {
+    const created = await createTodo(database.db, { title: "Original title" });
+    if (created.isErr()) throw created.error;
+
+    const result = await patchTodoService(database.db, created.value.id, { title: "New title" });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.title).toBe("New title");
+      expect(result.value.completed).toBe(created.value.completed);
+    }
+  });
+
+  it("never reaches the repository for an empty body", async () => {
+    const created = await createTodo(database.db, { title: "Should stay unchanged" });
+    if (created.isErr()) throw created.error;
+
+    const result = await patchTodoService(database.db, created.value.id, {});
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.type).toBe("request_validation");
+    }
+
+    const unchanged = await getTodoById(database.db, created.value.id);
+    if (unchanged.isErr()) throw unchanged.error;
+    expect(unchanged.value).toEqual(created.value);
+  });
+});
+
+>>>>>>> Stashed changes
 describe("GET /todos/:todoId", () => {
   let database: DisposableDatabase;
   let firstId: string;
