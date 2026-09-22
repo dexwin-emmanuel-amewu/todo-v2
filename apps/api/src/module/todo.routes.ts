@@ -209,6 +209,39 @@ export function toGetTodoResponse(
     .exhaustive();
 }
 
+type ReplaceTodoResponse =
+  | { status: 200; body: Todo }
+  | { status: 400; body: { error: { type: "validation"; issues: string[] } } }
+  | { status: 404; body: NotFoundErrorResponse }
+  | { status: 500; body: InternalErrorResponse };
+
+export function toReplaceTodoResponse(
+  result: Result<Todo, RequestValidationError | NotFoundError | ValidationError | DatabaseError>,
+): ReplaceTodoResponse {
+  if (result.isOk()) {
+    const validated = todoSchema.safeParse(result.value);
+
+    return validated.success
+      ? { status: 200, body: validated.data }
+      : { status: 500, body: internalErrorBody };
+  }
+
+  return match(result.error)
+    .with({ type: "request_validation" }, ({ issues }): ReplaceTodoResponse => ({
+      status: 400,
+      body: { error: { type: "validation", issues } },
+    }))
+    .with({ type: "not_found" }, (): ReplaceTodoResponse => ({
+      status: 404,
+      body: notFoundErrorBody,
+    }))
+    .with({ type: "validation" }, { type: "database" }, (): ReplaceTodoResponse => ({
+      status: 500,
+      body: internalErrorBody,
+    }))
+    .exhaustive();
+}
+
 export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
   app.post("/todos", async (request, reply) => {
     const result = await createTodoService(db, request.body);
