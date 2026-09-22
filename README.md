@@ -65,6 +65,16 @@ curl -X PUT http://localhost:3000/todos/5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a \
 
 Success: 200 with the updated todo. Failure: 400 with `{ "error": { "type": "validation", "issues": string[] } }` for a malformed id or an invalid body (the id check runs first, so a bad id and a bad body together return only the id's 400), 404 with `{ "error": { "type": "not_found" } }` when the id is well-formed but matches no todo (no row is created), 500 with `{ "error": { "type": "internal" } }` for a server-side failure.
 
+PATCH /todos/:todoId partially updates a todo. Body: any non-empty subset of `{ "title": string, "completed": boolean }` — send just `title`, just `completed`, or both. A field you omit keeps its current value; a field you include is validated the same way PUT validates it (title 6-100 chars after trimming). An empty body `{}`, or a body with no recognized fields, is rejected. `id` and `createdAt` never change.
+
+```
+curl -X PATCH http://localhost:3000/todos/5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a \
+  -H "Content-Type: application/json" \
+  -d '{"completed": true}'
+```
+
+Success: 200 with the updated todo. Failure: 400 with `{ "error": { "type": "validation", "issues": string[] } }` for a malformed id, an empty/unrecognized body, or an invalid field value (the id check runs first, so a bad id wins over any body problem), 404 with `{ "error": { "type": "not_found" } }` when the id is well-formed but matches no todo (no row is created), 500 with `{ "error": { "type": "internal" } }` for a server-side failure. Unlike PUT, PATCH never requires both fields — a body PUT would reject for missing `completed` is valid for PATCH.
+
 ## Tests
 
 apps/api's tests need Postgres running (pnpm docker:up). They create their own disposable database per run and drop it when done, so they won't touch your local data.
