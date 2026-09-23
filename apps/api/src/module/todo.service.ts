@@ -21,8 +21,6 @@ export function createTodoService(
 
   return createTodo(db, parsed.data);
 }
-<<<<<<< Updated upstream
-=======
 
 export function replaceTodoService(
   db: Db,
@@ -57,4 +55,3 @@ export function patchTodoService(
 
   return patchTodoById(db, id, parsed.data);
 }
->>>>>>> Stashed changes

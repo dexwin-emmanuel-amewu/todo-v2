@@ -1,5 +1,6 @@
 import {
   type CreateTodoInput,
+  type PatchTodoInput,
   type ReplaceTodoInput,
   type Todo,
   type TodoStatusFilter,
@@ -75,6 +76,26 @@ export function replaceTodoById(
       .set({ title: input.title, completed: input.completed, updatedAt: sql`now()` })
       .where(eq(todos.id, id))
       .returning(),
+    toDatabaseError,
+  ).andThen((rows) => {
+    const row = rows[0];
+    return row ? toRow(row) : err<Todo, NotFoundError>({ type: "not_found", id });
+  });
+}
+
+export function patchTodoById(
+  db: Db,
+  id: string,
+  input: PatchTodoInput,
+): ResultAsync<Todo, DatabaseError | NotFoundError | ValidationError> {
+  const patch = {
+    ...(input.title !== undefined ? { title: input.title } : {}),
+    ...(input.completed !== undefined ? { completed: input.completed } : {}),
+    updatedAt: sql`now()`,
+  };
+
+  return ResultAsync.fromPromise(
+    db.update(todos).set(patch).where(eq(todos.id, id)).returning(),
     toDatabaseError,
   ).andThen((rows) => {
     const row = rows[0];
