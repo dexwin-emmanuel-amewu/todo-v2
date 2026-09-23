@@ -75,6 +75,16 @@ curl -X PATCH http://localhost:3000/todos/5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a \
 
 Success: 200 with the updated todo. Failure: 400 with `{ "error": { "type": "validation", "issues": string[] } }` for a malformed id, an empty/unrecognized body, or an invalid field value (the id check runs first, so a bad id wins over any body problem), 404 with `{ "error": { "type": "not_found" } }` when the id is well-formed but matches no todo (no row is created), 500 with `{ "error": { "type": "internal" } }` for a server-side failure. Unlike PUT, PATCH never requires both fields, so a body PUT would reject for missing `completed` is valid for PATCH.
 
+PATCH /todos marks the whole collection active or complete. Body: `{ "completed": boolean }`, required. Every todo whose `completed` value differs from the request is updated in one statement; todos already matching are left untouched, including their `updated_at`. There is no `status`/`search` scoping, this always applies to the entire collection.
+
+```
+curl -X PATCH http://localhost:3000/todos \
+  -H "Content-Type: application/json" \
+  -d '{"completed": true}'
+```
+
+Success: 200 with `{ "updatedCount": number }`, the count of todos actually changed, not the todos themselves. An empty collection, or one already matching the requested value, returns 200 with `{ "updatedCount": 0 }`. Failure: 400 with `{ "error": { "type": "validation", "issues": string[] } }` for a missing or non-boolean `completed`, 500 with `{ "error": { "type": "internal" } }` for a server-side failure.
+
 DELETE /todos/:todoId deletes a todo. No request body is read. This is a hard delete: the row is removed permanently, and a repeated delete of the same id is a 404, not a second 204.
 
 ```

@@ -3,6 +3,8 @@ import {
   notFoundErrorResponseSchema,
   patchTodoSchema,
   replaceTodoSchema,
+  setAllTodosCompletedResponseSchema,
+  setAllTodosCompletedSchema,
   todoIdParamSchema,
   todoSchema,
   todoSearchQuerySchema,
@@ -158,6 +160,43 @@ describe("patchTodoSchema", () => {
 
     expect(patchTodoSchema.safeParse(body).success).toBe(true);
     expect(replaceTodoSchema.safeParse(body).success).toBe(false);
+  });
+});
+
+describe("setAllTodosCompletedSchema", () => {
+  it("accepts completed: true", () => {
+    expect(setAllTodosCompletedSchema.safeParse({ completed: true }).success).toBe(true);
+  });
+
+  it("accepts completed: false", () => {
+    expect(setAllTodosCompletedSchema.safeParse({ completed: false }).success).toBe(true);
+  });
+
+  it("rejects an empty object", () => {
+    expect(setAllTodosCompletedSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("rejects a completed value that isn't a boolean", () => {
+    expect(setAllTodosCompletedSchema.safeParse({ completed: "true" }).success).toBe(false);
+  });
+
+  it("strips an extra field but still accepts the body", () => {
+    const result = setAllTodosCompletedSchema.safeParse({ completed: true, notes: "x" });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ completed: true });
+    }
+  });
+});
+
+describe("setAllTodosCompletedResponseSchema", () => {
+  it("accepts updatedCount: 0", () => {
+    expect(setAllTodosCompletedResponseSchema.safeParse({ updatedCount: 0 }).success).toBe(true);
+  });
+
+  it("rejects a negative updatedCount", () => {
+    expect(setAllTodosCompletedResponseSchema.safeParse({ updatedCount: -1 }).success).toBe(false);
   });
 });
 

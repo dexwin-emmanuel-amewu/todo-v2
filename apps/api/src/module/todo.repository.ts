@@ -6,7 +6,7 @@ import {
   type TodoStatusFilter,
   todoSchema,
 } from "@todo/contracts";
-import { and, asc, count, eq, ilike, sql } from "drizzle-orm";
+import { and, asc, count, eq, ilike, ne, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { match } from "ts-pattern";
@@ -113,6 +113,20 @@ export function deleteTodoById(
   ).andThen((rows) =>
     rows[0] ? ok(undefined) : err<void, NotFoundError>({ type: "not_found", id }),
   );
+}
+
+export function setAllTodosCompleted(
+  db: Db,
+  completed: boolean,
+): ResultAsync<{ updatedCount: number }, DatabaseError> {
+  return ResultAsync.fromPromise(
+    db
+      .update(todos)
+      .set({ completed, updatedAt: sql`now()` })
+      .where(ne(todos.completed, completed))
+      .returning({ id: todos.id }),
+    toDatabaseError,
+  ).map((rows) => ({ updatedCount: rows.length }));
 }
 
 export type TodoPagination = { page: number; pageSize: number };
