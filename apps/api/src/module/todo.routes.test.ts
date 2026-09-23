@@ -938,6 +938,7 @@ describe("replaceTodoService", () => {
   });
 
 describe("patchTodoService", () => {
+describe("patchTodoService", () => {
   let database: DisposableDatabase;
 
       beforeAll(async () => {

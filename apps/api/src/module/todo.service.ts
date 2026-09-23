@@ -19,6 +19,7 @@ import {
 export type RequestValidationError = { type: "request_validation"; issues: string[] };
 
 export function createTodoService(
+export function createTodoService(
   db: Db,
   rawInput: unknown,
 ): ResultAsync<Todo, RequestValidationError | ValidationError | DatabaseError> {
@@ -34,6 +35,7 @@ export function createTodoService(
   return createTodo(db, parsed.data);
 }
 
+export function replaceTodoService(
 export function replaceTodoService(
   db: Db,
   id: string,
@@ -51,6 +53,7 @@ export function replaceTodoService(
   return replaceTodoById(db, id, parsed.data);
 }
 
+export function patchTodoService(
 export function patchTodoService(
   db: Db,
   id: string,
