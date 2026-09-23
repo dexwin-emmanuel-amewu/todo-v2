@@ -847,703 +847,709 @@ describe("toReplaceTodoResponse", () => {
 });
 
 describe("replaceTodoService", () => {
-describe("replaceTodoService", () => {
-  let database: DisposableDatabase;
+  describe("replaceTodoService", () => {
+    let database: DisposableDatabase;
 
-  beforeAll(async () => {
-    database = await createDisposableDatabase();
-    await migrateDisposableDatabase(database);
-  }, 20_000);
+    beforeAll(async () => {
+      database = await createDisposableDatabase();
+      await migrateDisposableDatabase(database);
+    }, 20_000);
 
-  afterAll(async () => {
-    await dropDisposableDatabase(database);
-  }, 20_000);
+    afterAll(async () => {
+      await dropDisposableDatabase(database);
+    }, 20_000);
 
-  it("calls through to the repository and resolves ok with the updated todo", async () => {
-    const created = await createTodo(database.db, { title: "Original title" });
-    if (created.isErr()) throw created.error;
+    it("calls through to the repository and resolves ok with the updated todo", async () => {
+      const created = await createTodo(database.db, { title: "Original title" });
+      if (created.isErr()) throw created.error;
 
-    const result = await replaceTodoService(database.db, created.value.id, {
-      title: "Updated title",
-      completed: true,
+      const result = await replaceTodoService(database.db, created.value.id, {
+        title: "Updated title",
+        completed: true,
+      });
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        expect(result.value.title).toBe("Updated title");
+        expect(result.value.completed).toBe(true);
+      }
     });
 
-    expect(result.isOk()).toBe(true);
-    if (result.isOk()) {
-      expect(result.value.title).toBe("Updated title");
-      expect(result.value.completed).toBe(true);
-    }
-  });
+    it("never reaches the repository for an invalid body", async () => {
+      const created = await createTodo(database.db, { title: "Should stay unchanged" });
+      if (created.isErr()) throw created.error;
 
-  it("never reaches the repository for an invalid body", async () => {
-    const created = await createTodo(database.db, { title: "Should stay unchanged" });
-    if (created.isErr()) throw created.error;
+      const result = await replaceTodoService(database.db, created.value.id, {
+        title: "New title",
+      });
 
-    const result = await replaceTodoService(database.db, created.value.id, { title: "New title" });
+      expect(result.isErr()).toBe(true);
+      if (result.isErr()) {
+        expect(result.error.type).toBe("request_validation");
+      }
 
-    expect(result.isErr()).toBe(true);
-    if (result.isErr()) {
-      expect(result.error.type).toBe("request_validation");
-    }
-
-    const unchanged = await getTodoById(database.db, created.value.id);
-    if (unchanged.isErr()) throw unchanged.error;
-    expect(unchanged.value).toEqual(created.value);
-  });
-});
-
-describe("toPatchTodoResponse", () => {
-  it("maps a successful patch to 200 with the updated todo", () => {
-    const response = toPatchTodoResponse(ok(exampleTodo));
-
-    expect(response.status).toBe(200);
-    expect(todoSchema.safeParse(response.body).success).toBe(true);
-  });
-
-  it("maps a request-body validation error to 400", () => {
-    const response = toPatchTodoResponse(
-      err({ type: "request_validation", issues: ["At least one field must be provided"] }),
-    );
-
-    expect(response.status).toBe(400);
-    expect(validationErrorResponseSchema.safeParse(response.body).success).toBe(true);
-  });
-
-  it("maps a not-found error to 404 without echoing the id", () => {
-    const response = toPatchTodoResponse(err({ type: "not_found", id: exampleTodo.id }));
-
-    expect(response.status).toBe(404);
-    expect(notFoundErrorResponseSchema.safeParse(response.body).success).toBe(true);
-    expect(JSON.stringify(response.body)).not.toContain(exampleTodo.id);
-  });
-
-  it("maps a database error to 500", () => {
-    const response = toPatchTodoResponse(err({ type: "database", cause: new Error("boom") }));
-
-    expect(response.status).toBe(500);
-    expect(internalErrorResponseSchema.safeParse(response.body).success).toBe(true);
-  });
-
-  it("maps a stored-row validation error to 500, not 200 and not 404", () => {
-    const response = toPatchTodoResponse(err({ type: "validation", issues: ["bad row"] }));
-
-    expect(response.status).toBe(500);
-    expect(internalErrorResponseSchema.safeParse(response.body).success).toBe(true);
-  });
-});
-
-describe("patchTodoService", () => {
-describe("patchTodoService", () => {
-  let database: DisposableDatabase;
-
-  beforeAll(async () => {
-    database = await createDisposableDatabase();
-    await migrateDisposableDatabase(database);
-  }, 20_000);
-
-  afterAll(async () => {
-    await dropDisposableDatabase(database);
-  }, 20_000);
-
-  it("calls through to the repository and resolves ok with the updated todo, completed unchanged", async () => {
-    const created = await createTodo(database.db, { title: "Original title" });
-    if (created.isErr()) throw created.error;
-
-    const result = await patchTodoService(database.db, created.value.id, { title: "New title" });
-
-    expect(result.isOk()).toBe(true);
-    if (result.isOk()) {
-      expect(result.value.title).toBe("New title");
-      expect(result.value.completed).toBe(created.value.completed);
-    }
-  });
-
-  it("never reaches the repository for an empty body", async () => {
-    const created = await createTodo(database.db, { title: "Should stay unchanged" });
-    if (created.isErr()) throw created.error;
-
-    const result = await patchTodoService(database.db, created.value.id, {});
-
-    expect(result.isErr()).toBe(true);
-    if (result.isErr()) {
-      expect(result.error.type).toBe("request_validation");
-    }
-
-    const unchanged = await getTodoById(database.db, created.value.id);
-    if (unchanged.isErr()) throw unchanged.error;
-    expect(unchanged.value).toEqual(created.value);
-  });
-});
-
-describe("GET /todos/:todoId", () => {
-  let database: DisposableDatabase;
-  let firstId: string;
-  let secondId: string;
-
-  beforeAll(async () => {
-    database = await createDisposableDatabase();
-    await migrateDisposableDatabase(database);
-
-    const first = await createTodo(database.db, { title: "First fetched by id" });
-    const second = await createTodo(database.db, { title: "Second fetched by id" });
-    if (first.isErr() || second.isErr()) throw new Error("setup failed");
-
-    firstId = first.value.id;
-    secondId = second.value.id;
-  }, 20_000);
-
-  afterAll(async () => {
-    await dropDisposableDatabase(database);
-  }, 20_000);
-
-  it("returns 200 and the todo for an existing id", async () => {
-    const app = buildApp(database.db);
-    const response = await app.inject({ method: "GET", url: `/todos/${firstId}` });
-
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(todoSchema.safeParse(body).success).toBe(true);
-    expect(body).toEqual({
-      id: firstId,
-      title: "First fetched by id",
-      completed: false,
-      createdAt: expect.any(String),
+      const unchanged = await getTodoById(database.db, created.value.id);
+      if (unchanged.isErr()) throw unchanged.error;
+      expect(unchanged.value).toEqual(created.value);
     });
   });
 
-  it("returns the requested todo, not simply the first row", async () => {
-    const app = buildApp(database.db);
-    const response = await app.inject({ method: "GET", url: `/todos/${secondId}` });
+  describe("toPatchTodoResponse", () => {
+    it("maps a successful patch to 200 with the updated todo", () => {
+      const response = toPatchTodoResponse(ok(exampleTodo));
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json().id).toBe(secondId);
-  });
-
-  it("returns 404 not_found for a well-formed but unused id", async () => {
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "GET",
-      url: "/todos/00000000-0000-0000-0000-000000000000",
+      expect(response.status).toBe(200);
+      expect(todoSchema.safeParse(response.body).success).toBe(true);
     });
 
-    expect(response.statusCode).toBe(404);
-    expect(response.json()).toEqual({ error: { type: "not_found" } });
-    expect(notFoundErrorResponseSchema.safeParse(response.json()).success).toBe(true);
-  });
+    it("maps a request-body validation error to 400", () => {
+      const response = toPatchTodoResponse(
+        err({ type: "request_validation", issues: ["At least one field must be provided"] }),
+      );
 
-  it("does not leak the requested id in the 404 body", async () => {
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "GET",
-      url: "/todos/00000000-0000-0000-0000-000000000000",
+      expect(response.status).toBe(400);
+      expect(validationErrorResponseSchema.safeParse(response.body).success).toBe(true);
     });
 
-    expect(response.body).not.toContain("00000000-0000-0000-0000-000000000000");
-  });
+    it("maps a not-found error to 404 without echoing the id", () => {
+      const response = toPatchTodoResponse(err({ type: "not_found", id: exampleTodo.id }));
 
-  it.each(["abc", "123", "5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1"])(
-    "returns 400 for the malformed id %s",
-    async (value) => {
-      const app = buildApp(database.db);
-      const response = await app.inject({ method: "GET", url: `/todos/${value}` });
-
-      expect(response.statusCode).toBe(400);
-      expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
-    },
-  );
-
-  it("still serves the collection route", async () => {
-    const app = buildApp(database.db);
-    const response = await app.inject({ method: "GET", url: "/todos" });
-
-    expect(response.statusCode).toBe(200);
-    expect(todoListResponseSchema.safeParse(response.json()).success).toBe(true);
-  });
-});
-
-describe("PUT /todos/:todoId", () => {
-  let database: DisposableDatabase;
-
-  beforeAll(async () => {
-    database = await createDisposableDatabase();
-    await migrateDisposableDatabase(database);
-  }, 20_000);
-
-  afterAll(async () => {
-    await dropDisposableDatabase(database);
-  }, 20_000);
-
-  it("returns 200 with the updated todo for a valid body", async () => {
-    const created = await createTodo(database.db, { title: "Original title" });
-    if (created.isErr()) throw created.error;
-
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "PUT",
-      url: `/todos/${created.value.id}`,
-      payload: { title: "Updated title", completed: true },
+      expect(response.status).toBe(404);
+      expect(notFoundErrorResponseSchema.safeParse(response.body).success).toBe(true);
+      expect(JSON.stringify(response.body)).not.toContain(exampleTodo.id);
     });
 
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(todoSchema.safeParse(body).success).toBe(true);
-    expect(body).toEqual({
-      id: created.value.id,
-      title: "Updated title",
-      completed: true,
-      createdAt: created.value.createdAt,
+    it("maps a database error to 500", () => {
+      const response = toPatchTodoResponse(err({ type: "database", cause: new Error("boom") }));
+
+      expect(response.status).toBe(500);
+      expect(internalErrorResponseSchema.safeParse(response.body).success).toBe(true);
+    });
+
+    it("maps a stored-row validation error to 500, not 200 and not 404", () => {
+      const response = toPatchTodoResponse(err({ type: "validation", issues: ["bad row"] }));
+
+      expect(response.status).toBe(500);
+      expect(internalErrorResponseSchema.safeParse(response.body).success).toBe(true);
     });
   });
 
-  it("persists the change, visible on a later GET", async () => {
-    const created = await createTodo(database.db, { title: "Before the update" });
-    if (created.isErr()) throw created.error;
+  describe("patchTodoService", () => {
+    describe("patchTodoService", () => {
+      let database: DisposableDatabase;
 
-    const app = buildApp(database.db);
-    await app.inject({
-      method: "PUT",
-      url: `/todos/${created.value.id}`,
-      payload: { title: "After the update", completed: true },
+      beforeAll(async () => {
+        database = await createDisposableDatabase();
+        await migrateDisposableDatabase(database);
+      }, 20_000);
+
+      afterAll(async () => {
+        await dropDisposableDatabase(database);
+      }, 20_000);
+
+      it("calls through to the repository and resolves ok with the updated todo, completed unchanged", async () => {
+        const created = await createTodo(database.db, { title: "Original title" });
+        if (created.isErr()) throw created.error;
+
+        const result = await patchTodoService(database.db, created.value.id, {
+          title: "New title",
+        });
+
+        expect(result.isOk()).toBe(true);
+        if (result.isOk()) {
+          expect(result.value.title).toBe("New title");
+          expect(result.value.completed).toBe(created.value.completed);
+        }
+      });
+
+      it("never reaches the repository for an empty body", async () => {
+        const created = await createTodo(database.db, { title: "Should stay unchanged" });
+        if (created.isErr()) throw created.error;
+
+        const result = await patchTodoService(database.db, created.value.id, {});
+
+        expect(result.isErr()).toBe(true);
+        if (result.isErr()) {
+          expect(result.error.type).toBe("request_validation");
+        }
+
+        const unchanged = await getTodoById(database.db, created.value.id);
+        if (unchanged.isErr()) throw unchanged.error;
+        expect(unchanged.value).toEqual(created.value);
+      });
     });
 
-    const response = await app.inject({ method: "GET", url: `/todos/${created.value.id}` });
+    describe("GET /todos/:todoId", () => {
+      let database: DisposableDatabase;
+      let firstId: string;
+      let secondId: string;
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ title: "After the update", completed: true });
-  });
+      beforeAll(async () => {
+        database = await createDisposableDatabase();
+        await migrateDisposableDatabase(database);
 
-  it("returns 404 for a well-formed but unused id, and creates no row", async () => {
-    const app = buildApp(database.db);
-    const before = await app.inject({ method: "GET", url: "/todos" });
+        const first = await createTodo(database.db, { title: "First fetched by id" });
+        const second = await createTodo(database.db, { title: "Second fetched by id" });
+        if (first.isErr() || second.isErr()) throw new Error("setup failed");
 
-    const response = await app.inject({
-      method: "PUT",
-      url: "/todos/00000000-0000-0000-0000-000000000000",
-      payload: { title: "Should not be created", completed: false },
+        firstId = first.value.id;
+        secondId = second.value.id;
+      }, 20_000);
+
+      afterAll(async () => {
+        await dropDisposableDatabase(database);
+      }, 20_000);
+
+      it("returns 200 and the todo for an existing id", async () => {
+        const app = buildApp(database.db);
+        const response = await app.inject({ method: "GET", url: `/todos/${firstId}` });
+
+        expect(response.statusCode).toBe(200);
+        const body = response.json();
+        expect(todoSchema.safeParse(body).success).toBe(true);
+        expect(body).toEqual({
+          id: firstId,
+          title: "First fetched by id",
+          completed: false,
+          createdAt: expect.any(String),
+        });
+      });
+
+      it("returns the requested todo, not simply the first row", async () => {
+        const app = buildApp(database.db);
+        const response = await app.inject({ method: "GET", url: `/todos/${secondId}` });
+
+        expect(response.statusCode).toBe(200);
+        expect(response.json().id).toBe(secondId);
+      });
+
+      it("returns 404 not_found for a well-formed but unused id", async () => {
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "GET",
+          url: "/todos/00000000-0000-0000-0000-000000000000",
+        });
+
+        expect(response.statusCode).toBe(404);
+        expect(response.json()).toEqual({ error: { type: "not_found" } });
+        expect(notFoundErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+      });
+
+      it("does not leak the requested id in the 404 body", async () => {
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "GET",
+          url: "/todos/00000000-0000-0000-0000-000000000000",
+        });
+
+        expect(response.body).not.toContain("00000000-0000-0000-0000-000000000000");
+      });
+
+      it.each(["abc", "123", "5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1"])(
+        "returns 400 for the malformed id %s",
+        async (value) => {
+          const app = buildApp(database.db);
+          const response = await app.inject({ method: "GET", url: `/todos/${value}` });
+
+          expect(response.statusCode).toBe(400);
+          expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+        },
+      );
+
+      it("still serves the collection route", async () => {
+        const app = buildApp(database.db);
+        const response = await app.inject({ method: "GET", url: "/todos" });
+
+        expect(response.statusCode).toBe(200);
+        expect(todoListResponseSchema.safeParse(response.json()).success).toBe(true);
+      });
     });
 
-    expect(response.statusCode).toBe(404);
-    expect(notFoundErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+    describe("PUT /todos/:todoId", () => {
+      let database: DisposableDatabase;
 
-    const after = await app.inject({ method: "GET", url: "/todos" });
-    expect(after.json().totalItems).toBe(before.json().totalItems);
-  });
+      beforeAll(async () => {
+        database = await createDisposableDatabase();
+        await migrateDisposableDatabase(database);
+      }, 20_000);
 
-  it("returns 400 for a malformed id", async () => {
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "PUT",
-      url: "/todos/abc",
-      payload: { title: "Valid title here", completed: false },
+      afterAll(async () => {
+        await dropDisposableDatabase(database);
+      }, 20_000);
+
+      it("returns 200 with the updated todo for a valid body", async () => {
+        const created = await createTodo(database.db, { title: "Original title" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "PUT",
+          url: `/todos/${created.value.id}`,
+          payload: { title: "Updated title", completed: true },
+        });
+
+        expect(response.statusCode).toBe(200);
+        const body = response.json();
+        expect(todoSchema.safeParse(body).success).toBe(true);
+        expect(body).toEqual({
+          id: created.value.id,
+          title: "Updated title",
+          completed: true,
+          createdAt: created.value.createdAt,
+        });
+      });
+
+      it("persists the change, visible on a later GET", async () => {
+        const created = await createTodo(database.db, { title: "Before the update" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        await app.inject({
+          method: "PUT",
+          url: `/todos/${created.value.id}`,
+          payload: { title: "After the update", completed: true },
+        });
+
+        const response = await app.inject({ method: "GET", url: `/todos/${created.value.id}` });
+
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toMatchObject({ title: "After the update", completed: true });
+      });
+
+      it("returns 404 for a well-formed but unused id, and creates no row", async () => {
+        const app = buildApp(database.db);
+        const before = await app.inject({ method: "GET", url: "/todos" });
+
+        const response = await app.inject({
+          method: "PUT",
+          url: "/todos/00000000-0000-0000-0000-000000000000",
+          payload: { title: "Should not be created", completed: false },
+        });
+
+        expect(response.statusCode).toBe(404);
+        expect(notFoundErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+
+        const after = await app.inject({ method: "GET", url: "/todos" });
+        expect(after.json().totalItems).toBe(before.json().totalItems);
+      });
+
+      it("returns 400 for a malformed id", async () => {
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "PUT",
+          url: "/todos/abc",
+          payload: { title: "Valid title here", completed: false },
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+      });
+
+      it("returns 400 for an invalid body: title too short, completed missing", async () => {
+        const created = await createTodo(database.db, { title: "Has a valid body originally" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "PUT",
+          url: `/todos/${created.value.id}`,
+          payload: { title: "hi" },
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+      });
+
+      it("returns the id's 400 when both the id and the body are invalid", async () => {
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "PUT",
+          url: "/todos/abc",
+          payload: { title: "hi" },
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+      });
     });
 
-    expect(response.statusCode).toBe(400);
-    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
-  });
+    describe("PATCH /todos/:todoId", () => {
+      let database: DisposableDatabase;
 
-  it("returns 400 for an invalid body: title too short, completed missing", async () => {
-    const created = await createTodo(database.db, { title: "Has a valid body originally" });
-    if (created.isErr()) throw created.error;
+      beforeAll(async () => {
+        database = await createDisposableDatabase();
+        await migrateDisposableDatabase(database);
+      }, 20_000);
 
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "PUT",
-      url: `/todos/${created.value.id}`,
-      payload: { title: "hi" },
+      afterAll(async () => {
+        await dropDisposableDatabase(database);
+      }, 20_000);
+
+      it("returns 200 with completed-only body, leaving title unchanged", async () => {
+        const created = await createTodo(database.db, { title: "Original title" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "PATCH",
+          url: `/todos/${created.value.id}`,
+          payload: { completed: true },
+        });
+
+        expect(response.statusCode).toBe(200);
+        const body = response.json();
+        expect(todoSchema.safeParse(body).success).toBe(true);
+        expect(body).toEqual({
+          id: created.value.id,
+          title: "Original title",
+          completed: true,
+          createdAt: created.value.createdAt,
+        });
+      });
+
+      it("returns 200 with title-only body, leaving completed unchanged", async () => {
+        const created = await createTodo(database.db, { title: "Original title" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "PATCH",
+          url: `/todos/${created.value.id}`,
+          payload: { title: "New title" },
+        });
+
+        expect(response.statusCode).toBe(200);
+        const body = response.json();
+        expect(todoSchema.safeParse(body).success).toBe(true);
+        expect(body).toEqual({
+          id: created.value.id,
+          title: "New title",
+          completed: created.value.completed,
+          createdAt: created.value.createdAt,
+        });
+      });
+
+      it("returns 200 and updates both fields when both are supplied", async () => {
+        const created = await createTodo(database.db, { title: "Original title" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "PATCH",
+          url: `/todos/${created.value.id}`,
+          payload: { title: "New title", completed: true },
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toEqual({
+          id: created.value.id,
+          title: "New title",
+          completed: true,
+          createdAt: created.value.createdAt,
+        });
+      });
+
+      it("persists the change, visible on a later GET", async () => {
+        const created = await createTodo(database.db, { title: "Before the patch" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        await app.inject({
+          method: "PATCH",
+          url: `/todos/${created.value.id}`,
+          payload: { title: "After the patch" },
+        });
+
+        const response = await app.inject({ method: "GET", url: `/todos/${created.value.id}` });
+
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toMatchObject({ title: "After the patch" });
+      });
+
+      it("returns 400 for an empty body, and touches nothing", async () => {
+        const created = await createTodo(database.db, { title: "Should stay unchanged" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "PATCH",
+          url: `/todos/${created.value.id}`,
+          payload: {},
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+
+        const after = await app.inject({ method: "GET", url: `/todos/${created.value.id}` });
+        expect(after.json()).toEqual(created.value);
+      });
+
+      it("returns the same 400 as an empty body when the body has only unrecognized fields", async () => {
+        const created = await createTodo(database.db, { title: "Should also stay unchanged" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "PATCH",
+          url: `/todos/${created.value.id}`,
+          payload: { notes: "x" },
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+      });
+
+      it("returns 404 for a well-formed but unused id, and creates no row", async () => {
+        const app = buildApp(database.db);
+        const before = await app.inject({ method: "GET", url: "/todos" });
+
+        const response = await app.inject({
+          method: "PATCH",
+          url: "/todos/00000000-0000-0000-0000-000000000000",
+          payload: { title: "Should not be created" },
+        });
+
+        expect(response.statusCode).toBe(404);
+        expect(notFoundErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+
+        const after = await app.inject({ method: "GET", url: "/todos" });
+        expect(after.json().totalItems).toBe(before.json().totalItems);
+      });
+
+      it("returns 400 for a malformed id", async () => {
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "PATCH",
+          url: "/todos/abc",
+          payload: { title: "Valid title here" },
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+      });
+
+      it("returns 400 for an invalid title: too short", async () => {
+        const created = await createTodo(database.db, { title: "Has a valid body originally" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "PATCH",
+          url: `/todos/${created.value.id}`,
+          payload: { title: "hi" },
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+      });
+
+      it("returns the id's 400 when both the id and the body are invalid", async () => {
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "PATCH",
+          url: "/todos/abc",
+          payload: {},
+        });
+
+        expect(response.statusCode).toBe(400);
+        expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+      });
     });
 
-    expect(response.statusCode).toBe(400);
-    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
-  });
+    describe("PATCH /todos/:todoId vs PUT /todos/:todoId", () => {
+      let database: DisposableDatabase;
 
-  it("returns the id's 400 when both the id and the body are invalid", async () => {
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "PUT",
-      url: "/todos/abc",
-      payload: { title: "hi" },
+      beforeAll(async () => {
+        database = await createDisposableDatabase();
+        await migrateDisposableDatabase(database);
+      }, 20_000);
+
+      afterAll(async () => {
+        await dropDisposableDatabase(database);
+      }, 20_000);
+
+      it("accepts a title-only body on PATCH (200) but rejects it on PUT (400) for the same todo", async () => {
+        const created = await createTodo(database.db, { title: "Original title" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        const body = { title: "New title" };
+
+        const patchResponse = await app.inject({
+          method: "PATCH",
+          url: `/todos/${created.value.id}`,
+          payload: body,
+        });
+        expect(patchResponse.statusCode).toBe(200);
+
+        const putResponse = await app.inject({
+          method: "PUT",
+          url: `/todos/${created.value.id}`,
+          payload: body,
+        });
+        expect(putResponse.statusCode).toBe(400);
+        expect(validationErrorResponseSchema.safeParse(putResponse.json()).success).toBe(true);
+      });
+
+      it("PATCH preserves the untouched field; PUT with the same partial body is rejected and leaves the row untouched too", async () => {
+        const created = await createTodo(database.db, { title: "Keep this title" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+
+        const patchResponse = await app.inject({
+          method: "PATCH",
+          url: `/todos/${created.value.id}`,
+          payload: { completed: true },
+        });
+        expect(patchResponse.statusCode).toBe(200);
+        expect(patchResponse.json().title).toBe("Keep this title");
+
+        const putResponse = await app.inject({
+          method: "PUT",
+          url: `/todos/${created.value.id}`,
+          payload: { completed: false },
+        });
+        expect(putResponse.statusCode).toBe(400);
+        expect(validationErrorResponseSchema.safeParse(putResponse.json()).success).toBe(true);
+
+        const after = await app.inject({ method: "GET", url: `/todos/${created.value.id}` });
+        expect(after.json()).toEqual({
+          id: created.value.id,
+          title: "Keep this title",
+          completed: true,
+          createdAt: created.value.createdAt,
+        });
+      });
     });
 
-    expect(response.statusCode).toBe(400);
-    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
-  });
-});
+    describe("toDeleteTodoResponse", () => {
+      it("maps a successful delete to 204 with an empty body", () => {
+        const response = toDeleteTodoResponse(ok(undefined));
 
-describe("PATCH /todos/:todoId", () => {
-  let database: DisposableDatabase;
+        expect(response.status).toBe(204);
+        expect(response.body).toBeUndefined();
+      });
 
-  beforeAll(async () => {
-    database = await createDisposableDatabase();
-    await migrateDisposableDatabase(database);
-  }, 20_000);
+      it("maps a not-found error to 404 without echoing the id", () => {
+        const response = toDeleteTodoResponse(err({ type: "not_found", id: exampleTodo.id }));
 
-  afterAll(async () => {
-    await dropDisposableDatabase(database);
-  }, 20_000);
+        expect(response.status).toBe(404);
+        expect(notFoundErrorResponseSchema.safeParse(response.body).success).toBe(true);
+        expect(JSON.stringify(response.body)).not.toContain(exampleTodo.id);
+      });
 
-  it("returns 200 with completed-only body, leaving title unchanged", async () => {
-    const created = await createTodo(database.db, { title: "Original title" });
-    if (created.isErr()) throw created.error;
+      it("maps a database error to 500", () => {
+        const response = toDeleteTodoResponse(err({ type: "database", cause: new Error("boom") }));
 
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "PATCH",
-      url: `/todos/${created.value.id}`,
-      payload: { completed: true },
+        expect(response.status).toBe(500);
+        expect(internalErrorResponseSchema.safeParse(response.body).success).toBe(true);
+      });
     });
 
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(todoSchema.safeParse(body).success).toBe(true);
-    expect(body).toEqual({
-      id: created.value.id,
-      title: "Original title",
-      completed: true,
-      createdAt: created.value.createdAt,
-    });
-  });
-
-  it("returns 200 with title-only body, leaving completed unchanged", async () => {
-    const created = await createTodo(database.db, { title: "Original title" });
-    if (created.isErr()) throw created.error;
-
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "PATCH",
-      url: `/todos/${created.value.id}`,
-      payload: { title: "New title" },
-    });
-
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(todoSchema.safeParse(body).success).toBe(true);
-    expect(body).toEqual({
-      id: created.value.id,
-      title: "New title",
-      completed: created.value.completed,
-      createdAt: created.value.createdAt,
-    });
-  });
-
-  it("returns 200 and updates both fields when both are supplied", async () => {
-    const created = await createTodo(database.db, { title: "Original title" });
-    if (created.isErr()) throw created.error;
-
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "PATCH",
-      url: `/todos/${created.value.id}`,
-      payload: { title: "New title", completed: true },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
-      id: created.value.id,
-      title: "New title",
-      completed: true,
-      createdAt: created.value.createdAt,
-    });
-  });
-
-  it("persists the change, visible on a later GET", async () => {
-    const created = await createTodo(database.db, { title: "Before the patch" });
-    if (created.isErr()) throw created.error;
-
-    const app = buildApp(database.db);
-    await app.inject({
-      method: "PATCH",
-      url: `/todos/${created.value.id}`,
-      payload: { title: "After the patch" },
-    });
-
-    const response = await app.inject({ method: "GET", url: `/todos/${created.value.id}` });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ title: "After the patch" });
-  });
-
-  it("returns 400 for an empty body, and touches nothing", async () => {
-    const created = await createTodo(database.db, { title: "Should stay unchanged" });
-    if (created.isErr()) throw created.error;
-
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "PATCH",
-      url: `/todos/${created.value.id}`,
-      payload: {},
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
-
-    const after = await app.inject({ method: "GET", url: `/todos/${created.value.id}` });
-    expect(after.json()).toEqual(created.value);
-  });
-
-  it("returns the same 400 as an empty body when the body has only unrecognized fields", async () => {
-    const created = await createTodo(database.db, { title: "Should also stay unchanged" });
-    if (created.isErr()) throw created.error;
-
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "PATCH",
-      url: `/todos/${created.value.id}`,
-      payload: { notes: "x" },
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
-  });
-
-  it("returns 404 for a well-formed but unused id, and creates no row", async () => {
-    const app = buildApp(database.db);
-    const before = await app.inject({ method: "GET", url: "/todos" });
-
-    const response = await app.inject({
-      method: "PATCH",
-      url: "/todos/00000000-0000-0000-0000-000000000000",
-      payload: { title: "Should not be created" },
-    });
-
-    expect(response.statusCode).toBe(404);
-    expect(notFoundErrorResponseSchema.safeParse(response.json()).success).toBe(true);
-
-    const after = await app.inject({ method: "GET", url: "/todos" });
-    expect(after.json().totalItems).toBe(before.json().totalItems);
-  });
-
-  it("returns 400 for a malformed id", async () => {
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "PATCH",
-      url: "/todos/abc",
-      payload: { title: "Valid title here" },
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
-  });
-
-  it("returns 400 for an invalid title: too short", async () => {
-    const created = await createTodo(database.db, { title: "Has a valid body originally" });
-    if (created.isErr()) throw created.error;
-
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "PATCH",
-      url: `/todos/${created.value.id}`,
-      payload: { title: "hi" },
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
-  });
-
-  it("returns the id's 400 when both the id and the body are invalid", async () => {
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "PATCH",
-      url: "/todos/abc",
-      payload: {},
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
-  });
-});
-
-describe("PATCH /todos/:todoId vs PUT /todos/:todoId", () => {
-  let database: DisposableDatabase;
-
-  beforeAll(async () => {
-    database = await createDisposableDatabase();
-    await migrateDisposableDatabase(database);
-  }, 20_000);
-
-  afterAll(async () => {
-    await dropDisposableDatabase(database);
-  }, 20_000);
-
-  it("accepts a title-only body on PATCH (200) but rejects it on PUT (400) for the same todo", async () => {
-    const created = await createTodo(database.db, { title: "Original title" });
-    if (created.isErr()) throw created.error;
-
-    const app = buildApp(database.db);
-    const body = { title: "New title" };
-
-    const patchResponse = await app.inject({
-      method: "PATCH",
-      url: `/todos/${created.value.id}`,
-      payload: body,
-    });
-    expect(patchResponse.statusCode).toBe(200);
-
-    const putResponse = await app.inject({
-      method: "PUT",
-      url: `/todos/${created.value.id}`,
-      payload: body,
-    });
-    expect(putResponse.statusCode).toBe(400);
-    expect(validationErrorResponseSchema.safeParse(putResponse.json()).success).toBe(true);
-  });
-
-  it("PATCH preserves the untouched field; PUT with the same partial body is rejected and leaves the row untouched too", async () => {
-    const created = await createTodo(database.db, { title: "Keep this title" });
-    if (created.isErr()) throw created.error;
-
-    const app = buildApp(database.db);
-
-    const patchResponse = await app.inject({
-      method: "PATCH",
-      url: `/todos/${created.value.id}`,
-      payload: { completed: true },
-    });
-    expect(patchResponse.statusCode).toBe(200);
-    expect(patchResponse.json().title).toBe("Keep this title");
-
-    const putResponse = await app.inject({
-      method: "PUT",
-      url: `/todos/${created.value.id}`,
-      payload: { completed: false },
-    });
-    expect(putResponse.statusCode).toBe(400);
-    expect(validationErrorResponseSchema.safeParse(putResponse.json()).success).toBe(true);
-
-    const after = await app.inject({ method: "GET", url: `/todos/${created.value.id}` });
-    expect(after.json()).toEqual({
-      id: created.value.id,
-      title: "Keep this title",
-      completed: true,
-      createdAt: created.value.createdAt,
-    });
-  });
-});
-
-describe("toDeleteTodoResponse", () => {
-  it("maps a successful delete to 204 with an empty body", () => {
-    const response = toDeleteTodoResponse(ok(undefined));
-
-    expect(response.status).toBe(204);
-    expect(response.body).toBeUndefined();
-  });
-
-  it("maps a not-found error to 404 without echoing the id", () => {
-    const response = toDeleteTodoResponse(err({ type: "not_found", id: exampleTodo.id }));
-
-    expect(response.status).toBe(404);
-    expect(notFoundErrorResponseSchema.safeParse(response.body).success).toBe(true);
-    expect(JSON.stringify(response.body)).not.toContain(exampleTodo.id);
-  });
-
-  it("maps a database error to 500", () => {
-    const response = toDeleteTodoResponse(err({ type: "database", cause: new Error("boom") }));
-
-    expect(response.status).toBe(500);
-    expect(internalErrorResponseSchema.safeParse(response.body).success).toBe(true);
-  });
-});
-
-describe("DELETE /todos/:todoId", () => {
-  let database: DisposableDatabase;
-
-  beforeAll(async () => {
-    database = await createDisposableDatabase();
-    await migrateDisposableDatabase(database);
-  }, 20_000);
-
-  afterAll(async () => {
-    await dropDisposableDatabase(database);
-  }, 20_000);
-
-  it("returns 204 with an empty body for an existing todo", async () => {
-    const created = await createTodo(database.db, { title: "Todo to delete" });
-    if (created.isErr()) throw created.error;
-
-    const app = buildApp(database.db);
-    const response = await app.inject({ method: "DELETE", url: `/todos/${created.value.id}` });
-
-    expect(response.statusCode).toBe(204);
-    expect(response.body).toBe("");
-  });
-
-  it("removes the todo: a later GET for the same id returns 404", async () => {
-    const created = await createTodo(database.db, { title: "Gone after delete" });
-    if (created.isErr()) throw created.error;
-
-    const app = buildApp(database.db);
-    await app.inject({ method: "DELETE", url: `/todos/${created.value.id}` });
-
-    const response = await app.inject({ method: "GET", url: `/todos/${created.value.id}` });
-
-    expect(response.statusCode).toBe(404);
-    expect(notFoundErrorResponseSchema.safeParse(response.json()).success).toBe(true);
-  });
-
-  it("removes the todo from the collection and updates totalItems", async () => {
-    const created = await createTodo(database.db, { title: "Removed from the list" });
-    if (created.isErr()) throw created.error;
-
-    const app = buildApp(database.db);
-    const before = await app.inject({ method: "GET", url: "/todos" });
-
-    await app.inject({ method: "DELETE", url: `/todos/${created.value.id}` });
-
-    const after = await app.inject({ method: "GET", url: "/todos" });
-    expect(after.json().totalItems).toBe(before.json().totalItems - 1);
-    expect(after.json().items.map((todo: Todo) => todo.id)).not.toContain(created.value.id);
-  });
-
-  it("returns 404 for a well-formed but unused id", async () => {
-    const app = buildApp(database.db);
-    const response = await app.inject({
-      method: "DELETE",
-      url: "/todos/00000000-0000-0000-0000-000000000000",
-    });
-
-    expect(response.statusCode).toBe(404);
-    expect(notFoundErrorResponseSchema.safeParse(response.json()).success).toBe(true);
-  });
-
-  it("returns 400 for a malformed id", async () => {
-    const app = buildApp(database.db);
-    const response = await app.inject({ method: "DELETE", url: "/todos/abc" });
-
-    expect(response.statusCode).toBe(400);
-    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
-  });
-
-  it("returns 404 on a second delete of the same id, the final state is deleted", async () => {
-    const created = await createTodo(database.db, { title: "Delete me twice over HTTP" });
-    if (created.isErr()) throw created.error;
-
-    const app = buildApp(database.db);
-    const first = await app.inject({ method: "DELETE", url: `/todos/${created.value.id}` });
-    expect(first.statusCode).toBe(204);
-
-    const second = await app.inject({ method: "DELETE", url: `/todos/${created.value.id}` });
-    expect(second.statusCode).toBe(404);
-    expect(notFoundErrorResponseSchema.safeParse(second.json()).success).toBe(true);
-
-    const finalGet = await app.inject({ method: "GET", url: `/todos/${created.value.id}` });
-    expect(finalGet.statusCode).toBe(404);
-  });
-
-  it("deletes only the targeted todo, leaving another todo retrievable and unchanged", async () => {
-    const target = await createTodo(database.db, { title: "Target todo" });
-    const other = await createTodo(database.db, { title: "Untouched todo" });
-    if (target.isErr() || other.isErr()) throw new Error("setup failed");
-
-    const app = buildApp(database.db);
-    await app.inject({ method: "DELETE", url: `/todos/${target.value.id}` });
-
-    const response = await app.inject({ method: "GET", url: `/todos/${other.value.id}` });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
-      id: other.value.id,
-      title: "Untouched todo",
-      completed: false,
-      createdAt: other.value.createdAt,
+    describe("DELETE /todos/:todoId", () => {
+      let database: DisposableDatabase;
+
+      beforeAll(async () => {
+        database = await createDisposableDatabase();
+        await migrateDisposableDatabase(database);
+      }, 20_000);
+
+      afterAll(async () => {
+        await dropDisposableDatabase(database);
+      }, 20_000);
+
+      it("returns 204 with an empty body for an existing todo", async () => {
+        const created = await createTodo(database.db, { title: "Todo to delete" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        const response = await app.inject({ method: "DELETE", url: `/todos/${created.value.id}` });
+
+        expect(response.statusCode).toBe(204);
+        expect(response.body).toBe("");
+      });
+
+      it("removes the todo: a later GET for the same id returns 404", async () => {
+        const created = await createTodo(database.db, { title: "Gone after delete" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        await app.inject({ method: "DELETE", url: `/todos/${created.value.id}` });
+
+        const response = await app.inject({ method: "GET", url: `/todos/${created.value.id}` });
+
+        expect(response.statusCode).toBe(404);
+        expect(notFoundErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+      });
+
+      it("removes the todo from the collection and updates totalItems", async () => {
+        const created = await createTodo(database.db, { title: "Removed from the list" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        const before = await app.inject({ method: "GET", url: "/todos" });
+
+        await app.inject({ method: "DELETE", url: `/todos/${created.value.id}` });
+
+        const after = await app.inject({ method: "GET", url: "/todos" });
+        expect(after.json().totalItems).toBe(before.json().totalItems - 1);
+        expect(after.json().items.map((todo: Todo) => todo.id)).not.toContain(created.value.id);
+      });
+
+      it("returns 404 for a well-formed but unused id", async () => {
+        const app = buildApp(database.db);
+        const response = await app.inject({
+          method: "DELETE",
+          url: "/todos/00000000-0000-0000-0000-000000000000",
+        });
+
+        expect(response.statusCode).toBe(404);
+        expect(notFoundErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+      });
+
+      it("returns 400 for a malformed id", async () => {
+        const app = buildApp(database.db);
+        const response = await app.inject({ method: "DELETE", url: "/todos/abc" });
+
+        expect(response.statusCode).toBe(400);
+        expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+      });
+
+      it("returns 404 on a second delete of the same id, the final state is deleted", async () => {
+        const created = await createTodo(database.db, { title: "Delete me twice over HTTP" });
+        if (created.isErr()) throw created.error;
+
+        const app = buildApp(database.db);
+        const first = await app.inject({ method: "DELETE", url: `/todos/${created.value.id}` });
+        expect(first.statusCode).toBe(204);
+
+        const second = await app.inject({ method: "DELETE", url: `/todos/${created.value.id}` });
+        expect(second.statusCode).toBe(404);
+        expect(notFoundErrorResponseSchema.safeParse(second.json()).success).toBe(true);
+
+        const finalGet = await app.inject({ method: "GET", url: `/todos/${created.value.id}` });
+        expect(finalGet.statusCode).toBe(404);
+      });
+
+      it("deletes only the targeted todo, leaving another todo retrievable and unchanged", async () => {
+        const target = await createTodo(database.db, { title: "Target todo" });
+        const other = await createTodo(database.db, { title: "Untouched todo" });
+        if (target.isErr() || other.isErr()) throw new Error("setup failed");
+
+        const app = buildApp(database.db);
+        await app.inject({ method: "DELETE", url: `/todos/${target.value.id}` });
+
+        const response = await app.inject({ method: "GET", url: `/todos/${other.value.id}` });
+
+        expect(response.statusCode).toBe(200);
+        expect(response.json()).toEqual({
+          id: other.value.id,
+          title: "Untouched todo",
+          completed: false,
+          createdAt: other.value.createdAt,
+        });
+      });
     });
   });
 });
