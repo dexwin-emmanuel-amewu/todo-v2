@@ -1,12 +1,12 @@
-import { createTodoSchema, patchTodoSchema, replaceTodoSchema, type Todo } from "@todo/contracts";
+import { createTodoSchema, replaceTodoSchema, type Todo } from "@todo/contracts";
 import { errAsync, type ResultAsync } from "neverthrow";
 
 import type { DatabaseError, NotFoundError, ValidationError } from "../db/errors.js";
-import { createTodo, type Db, patchTodoById, replaceTodoById } from "./todo.repository.js";
+import { createTodo, type Db, replaceTodoById } from "./todo.repository.js";
 
 export type RequestValidationError = { type: "request_validation"; issues: string[] };
 
-export function createTodoFlow(
+export function createTodoService(
   db: Db,
   rawInput: unknown,
 ): ResultAsync<Todo, RequestValidationError | ValidationError | DatabaseError> {
@@ -22,7 +22,7 @@ export function createTodoFlow(
   return createTodo(db, parsed.data);
 }
 
-export function replaceTodoFlow(
+export function replaceTodoService(
   db: Db,
   id: string,
   rawInput: unknown,
@@ -39,7 +39,7 @@ export function replaceTodoFlow(
   return replaceTodoById(db, id, parsed.data);
 }
 
-export function patchTodoFlow(
+export function patchTodoService(
   db: Db,
   id: string,
   rawInput: unknown,

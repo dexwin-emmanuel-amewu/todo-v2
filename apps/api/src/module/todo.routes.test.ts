@@ -19,7 +19,7 @@ import {
 } from "../db/test-db";
 import { buildApp } from "./app.js";
 import { createTodo, getTodoById } from "./todo.repository.js";
-import { patchTodoFlow, replaceTodoFlow } from "./todo.service.js";
+import { patchTodoService, replaceTodoService } from "./todo.service.js";
 import {
   parsePagination,
   parseSearchQuery,
@@ -651,7 +651,7 @@ describe("toReplaceTodoResponse", () => {
   });
 });
 
-describe("replaceTodoFlow", () => {
+describe("replaceTodoService", () => {
   let database: DisposableDatabase;
 
   beforeAll(async () => {
@@ -736,7 +736,7 @@ describe("toPatchTodoResponse", () => {
   });
 });
 
-describe("patchTodoFlow", () => {
+describe("patchTodoService", () => {
   let database: DisposableDatabase;
 
   beforeAll(async () => {
