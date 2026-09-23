@@ -1,9 +1,11 @@
 import {
   type InternalErrorResponse,
   type NotFoundErrorResponse,
+  type SetAllTodosCompletedResponse,
   type Todo,
   type TodoListResponse,
   type TodoStatusFilter,
+  setAllTodosCompletedResponseSchema,
   todoIdParamSchema,
   todoListResponseSchema,
   todoPageQuerySchema,
@@ -25,6 +27,7 @@ import {
   patchTodoService,
   replaceTodoService,
   type RequestValidationError,
+  setAllTodosCompletedService,
 } from "./todo.service.js";
 
 const internalErrorBody: InternalErrorResponse = { error: { type: "internal" } };
@@ -271,6 +274,34 @@ export function toPatchTodoResponse(
     .exhaustive();
 }
 
+type SetAllTodosCompletedRouteResponse =
+  | { status: 200; body: SetAllTodosCompletedResponse }
+  | { status: 400; body: { error: { type: "validation"; issues: string[] } } }
+  | { status: 500; body: InternalErrorResponse };
+
+export function toSetAllTodosCompletedResponse(
+  result: Result<{ updatedCount: number }, RequestValidationError | DatabaseError>,
+): SetAllTodosCompletedRouteResponse {
+  if (result.isOk()) {
+    const validated = setAllTodosCompletedResponseSchema.safeParse(result.value);
+
+    return validated.success
+      ? { status: 200, body: validated.data }
+      : { status: 500, body: internalErrorBody };
+  }
+
+  return match(result.error)
+    .with({ type: "request_validation" }, ({ issues }): SetAllTodosCompletedRouteResponse => ({
+      status: 400,
+      body: { error: { type: "validation", issues } },
+    }))
+    .with({ type: "database" }, (): SetAllTodosCompletedRouteResponse => ({
+      status: 500,
+      body: internalErrorBody,
+    }))
+    .exhaustive();
+}
+
 type DeleteTodoResponse =
   | { status: 204; body: undefined }
   | { status: 404; body: NotFoundErrorResponse }
@@ -356,6 +387,17 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
     }
 
     const { status, body } = toListTodosResponse(result);
+    return reply.status(status).send(body);
+  });
+
+  app.patch("/todos", async (request, reply) => {
+    const result = await setAllTodosCompletedService(db, request.body);
+
+    if (result.isErr() && result.error.type !== "request_validation") {
+      request.log.error({ err: result.error }, "PATCH /todos failed");
+    }
+
+    const { status, body } = toSetAllTodosCompletedResponse(result);
     return reply.status(status).send(body);
   });
 

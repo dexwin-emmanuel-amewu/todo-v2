@@ -1,6 +1,7 @@
 import {
   internalErrorResponseSchema,
   notFoundErrorResponseSchema,
+  setAllTodosCompletedResponseSchema,
   todoListResponseSchema,
   todoSchema,
   validationErrorResponseSchema,
@@ -19,7 +20,11 @@ import {
 } from "../db/test-db";
 import { buildApp } from "./app.js";
 import { createTodo, getTodoById } from "./todo.repository.js";
-import { patchTodoService, replaceTodoService } from "./todo.service.js";
+import {
+  patchTodoService,
+  replaceTodoService,
+  setAllTodosCompletedService,
+} from "./todo.service.js";
 import {
   parsePagination,
   parseSearchQuery,
@@ -31,6 +36,7 @@ import {
   toListTodosResponse,
   toPatchTodoResponse,
   toReplaceTodoResponse,
+  toSetAllTodosCompletedResponse,
 } from "./todo.routes.js";
 
 const exampleTodo: Todo = {
@@ -555,6 +561,194 @@ describe("GET /todos?page=&pageSize=", () => {
   });
 });
 
+describe("toSetAllTodosCompletedResponse", () => {
+  it("maps a successful update to 200 with the updated count", () => {
+    const response = toSetAllTodosCompletedResponse(ok({ updatedCount: 3 }));
+
+    expect(response.status).toBe(200);
+    expect(setAllTodosCompletedResponseSchema.safeParse(response.body).success).toBe(true);
+    expect(response.body).toEqual({ updatedCount: 3 });
+  });
+
+  it("maps a request-body validation error to 400", () => {
+    const response = toSetAllTodosCompletedResponse(
+      err({ type: "request_validation", issues: ["Required"] }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it("maps a database error to 500", () => {
+    const response = toSetAllTodosCompletedResponse(
+      err({ type: "database", cause: new Error("boom") }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(internalErrorResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+});
+
+describe("setAllTodosCompletedService", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("calls through to the repository and resolves ok", async () => {
+    const created = await createTodo(database.db, { title: "Mark me complete" });
+    if (created.isErr()) throw created.error;
+
+    const result = await setAllTodosCompletedService(database.db, { completed: true });
+
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.updatedCount).toBeGreaterThanOrEqual(1);
+    }
+
+    const after = await getTodoById(database.db, created.value.id);
+    if (after.isErr()) throw after.error;
+    expect(after.value.completed).toBe(true);
+  });
+
+  it("never reaches the repository for an empty body", async () => {
+    const created = await createTodo(database.db, { title: "Should stay unchanged" });
+    if (created.isErr()) throw created.error;
+
+    const result = await setAllTodosCompletedService(database.db, {});
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.type).toBe("request_validation");
+    }
+
+    const unchanged = await getTodoById(database.db, created.value.id);
+    if (unchanged.isErr()) throw unchanged.error;
+    expect(unchanged.value.completed).toBe(created.value.completed);
+  });
+});
+
+describe("PATCH /todos", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("marks every active todo completed and returns the count actually changed", async () => {
+    const app = buildApp(database.db);
+    const first = await createTodo(database.db, { title: "First active todo" });
+    const second = await createTodo(database.db, { title: "Second active todo" });
+    if (first.isErr() || second.isErr()) throw new Error("setup failed");
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/todos",
+      payload: { completed: true },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ updatedCount: 2 });
+
+    const active = await app.inject({ method: "GET", url: "/todos?status=active" });
+    const completed = await app.inject({ method: "GET", url: "/todos?status=completed" });
+    expect(active.json().totalItems).toBe(0);
+    expect(completed.json().totalItems).toBe(2);
+  });
+
+  it("returns updatedCount: 0 on an immediate repeat call with the same value", async () => {
+    const app = buildApp(database.db);
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/todos",
+      payload: { completed: true },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ updatedCount: 0 });
+  });
+
+  it("marks every todo active, only flipping the ones that were completed", async () => {
+    const app = buildApp(database.db);
+    const third = await createTodo(database.db, { title: "Third, still active todo" });
+    if (third.isErr()) throw third.error;
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/todos",
+      payload: { completed: false },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ updatedCount: 2 });
+
+    const active = await app.inject({ method: "GET", url: "/todos?status=active" });
+    expect(active.json().totalItems).toBe(3);
+  });
+
+  it("returns 400 for an empty body, and touches nothing", async () => {
+    const app = buildApp(database.db);
+    const before = await app.inject({ method: "GET", url: "/todos" });
+
+    const response = await app.inject({ method: "PATCH", url: "/todos", payload: {} });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+
+    const after = await app.inject({ method: "GET", url: "/todos" });
+    expect(after.json().totalItems).toBe(before.json().totalItems);
+  });
+
+  it("returns 400 when completed is not a boolean", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/todos",
+      payload: { completed: "true" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+  });
+});
+
+describe("PATCH /todos, empty collection", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("returns 200 with updatedCount: 0 when there are no todos", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/todos",
+      payload: { completed: true },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ updatedCount: 0 });
+  });
+});
+
 describe("parseTodoId", () => {
   it("accepts a well-formed uuid and returns it unchanged", () => {
     const result = parseTodoId("5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a");
@@ -653,6 +847,7 @@ describe("toReplaceTodoResponse", () => {
 });
 
 describe("replaceTodoService", () => {
+describe("replaceTodoService", () => {
   let database: DisposableDatabase;
 
   beforeAll(async () => {
@@ -668,7 +863,7 @@ describe("replaceTodoService", () => {
     const created = await createTodo(database.db, { title: "Original title" });
     if (created.isErr()) throw created.error;
 
-    const result = await replaceTodoFlow(database.db, created.value.id, {
+    const result = await replaceTodoService(database.db, created.value.id, {
       title: "Updated title",
       completed: true,
     });
@@ -684,7 +879,7 @@ describe("replaceTodoService", () => {
     const created = await createTodo(database.db, { title: "Should stay unchanged" });
     if (created.isErr()) throw created.error;
 
-    const result = await replaceTodoFlow(database.db, created.value.id, { title: "New title" });
+    const result = await replaceTodoService(database.db, created.value.id, { title: "New title" });
 
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
@@ -738,6 +933,7 @@ describe("toPatchTodoResponse", () => {
 });
 
 describe("patchTodoService", () => {
+describe("patchTodoService", () => {
   let database: DisposableDatabase;
 
   beforeAll(async () => {
@@ -753,7 +949,7 @@ describe("patchTodoService", () => {
     const created = await createTodo(database.db, { title: "Original title" });
     if (created.isErr()) throw created.error;
 
-    const result = await patchTodoFlow(database.db, created.value.id, { title: "New title" });
+    const result = await patchTodoService(database.db, created.value.id, { title: "New title" });
 
     expect(result.isOk()).toBe(true);
     if (result.isOk()) {
@@ -766,7 +962,7 @@ describe("patchTodoService", () => {
     const created = await createTodo(database.db, { title: "Should stay unchanged" });
     if (created.isErr()) throw created.error;
 
-    const result = await patchTodoFlow(database.db, created.value.id, {});
+    const result = await patchTodoService(database.db, created.value.id, {});
 
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {

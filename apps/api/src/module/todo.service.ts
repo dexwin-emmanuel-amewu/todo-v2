@@ -1,11 +1,24 @@
-import { createTodoSchema, replaceTodoSchema, type Todo } from "@todo/contracts";
+import {
+  createTodoSchema,
+  patchTodoSchema,
+  replaceTodoSchema,
+  setAllTodosCompletedSchema,
+  type Todo,
+} from "@todo/contracts";
 import { errAsync, type ResultAsync } from "neverthrow";
 
 import type { DatabaseError, NotFoundError, ValidationError } from "../db/errors.js";
-import { createTodo, type Db, replaceTodoById } from "./todo.repository.js";
+import {
+  createTodo,
+  type Db,
+  patchTodoById,
+  replaceTodoById,
+  setAllTodosCompleted,
+} from "./todo.repository.js";
 
 export type RequestValidationError = { type: "request_validation"; issues: string[] };
 
+export function createTodoService(
 export function createTodoService(
   db: Db,
   rawInput: unknown,
@@ -22,6 +35,7 @@ export function createTodoService(
   return createTodo(db, parsed.data);
 }
 
+export function replaceTodoService(
 export function replaceTodoService(
   db: Db,
   id: string,
@@ -40,6 +54,7 @@ export function replaceTodoService(
 }
 
 export function patchTodoService(
+export function patchTodoService(
   db: Db,
   id: string,
   rawInput: unknown,
@@ -54,4 +69,20 @@ export function patchTodoService(
   }
 
   return patchTodoById(db, id, parsed.data);
+}
+
+export function setAllTodosCompletedService(
+  db: Db,
+  rawInput: unknown,
+): ResultAsync<{ updatedCount: number }, RequestValidationError | DatabaseError> {
+  const parsed = setAllTodosCompletedSchema.safeParse(rawInput);
+
+  if (!parsed.success) {
+    return errAsync({
+      type: "request_validation",
+      issues: parsed.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  return setAllTodosCompleted(db, parsed.data.completed);
 }
