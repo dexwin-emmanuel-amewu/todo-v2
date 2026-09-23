@@ -103,6 +103,18 @@ export function patchTodoById(
   });
 }
 
+export function deleteTodoById(
+  db: Db,
+  id: string,
+): ResultAsync<void, DatabaseError | NotFoundError> {
+  return ResultAsync.fromPromise(
+    db.delete(todos).where(eq(todos.id, id)).returning({ id: todos.id }),
+    toDatabaseError,
+  ).andThen((rows) =>
+    rows[0] ? ok(undefined) : err<void, NotFoundError>({ type: "not_found", id }),
+  );
+}
+
 export type TodoPagination = { page: number; pageSize: number };
 
 export type PaginatedTodos = {

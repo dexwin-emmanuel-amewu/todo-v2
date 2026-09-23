@@ -10,6 +10,7 @@ import {
 } from "../db/test-db";
 import {
   createTodo,
+  deleteTodoById,
   getTodoById,
   listTodos,
   patchTodoById,
@@ -545,6 +546,80 @@ describe("todos repository, patchTodoById", () => {
     if (untouched.isErr()) throw untouched.error;
 
     expect(untouched.value).toEqual(other.value);
+  });
+});
+
+describe("todos repository, deleteTodoById", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("removes the row so it can no longer be selected", async () => {
+    const created = await createTodo(database.db, { title: "Doomed todo" });
+    if (created.isErr()) throw created.error;
+
+    const deleted = await deleteTodoById(database.db, created.value.id);
+    expect(deleted.isOk()).toBe(true);
+
+    const found = await getTodoById(database.db, created.value.id);
+    expect(found.isErr()).toBe(true);
+    if (found.isErr()) {
+      expect(found.error).toEqual({ type: "not_found", id: created.value.id });
+    }
+  });
+
+  it("returns not_found for a random unused id and deletes nothing", async () => {
+    const unusedId = "00000000-0000-0000-0000-000000000000";
+    const before = await listTodos(database.db);
+    if (before.isErr()) throw before.error;
+
+    const result = await deleteTodoById(database.db, unusedId);
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error).toEqual({ type: "not_found", id: unusedId });
+    }
+
+    const after = await listTodos(database.db);
+    if (after.isErr()) throw after.error;
+    expect(after.value.totalItems).toBe(before.value.totalItems);
+  });
+
+  it("deletes only the targeted row, leaving the other todo unchanged", async () => {
+    const target = await createTodo(database.db, { title: "Target todo" });
+    const other = await createTodo(database.db, { title: "Untouched todo" });
+    if (target.isErr() || other.isErr()) throw new Error("setup failed");
+
+    const deleted = await deleteTodoById(database.db, target.value.id);
+    expect(deleted.isOk()).toBe(true);
+
+    const untouched = await getTodoById(database.db, other.value.id);
+    if (untouched.isErr()) throw untouched.error;
+    expect(untouched.value).toEqual(other.value);
+  });
+
+  it("returns not_found on a second delete of the same id, final state has the row gone", async () => {
+    const created = await createTodo(database.db, { title: "Delete me twice" });
+    if (created.isErr()) throw created.error;
+
+    const first = await deleteTodoById(database.db, created.value.id);
+    expect(first.isOk()).toBe(true);
+
+    const second = await deleteTodoById(database.db, created.value.id);
+    expect(second.isErr()).toBe(true);
+    if (second.isErr()) {
+      expect(second.error).toEqual({ type: "not_found", id: created.value.id });
+    }
+
+    const found = await getTodoById(database.db, created.value.id);
+    expect(found.isErr()).toBe(true);
   });
 });
 
