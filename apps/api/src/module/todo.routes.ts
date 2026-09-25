@@ -1,10 +1,12 @@
 import {
+  type ClearCompletedTodosResponse,
   type InternalErrorResponse,
   type NotFoundErrorResponse,
   type SetAllTodosCompletedResponse,
   type Todo,
   type TodoListResponse,
   type TodoStatusFilter,
+  clearCompletedTodosResponseSchema,
   setAllTodosCompletedResponseSchema,
   todoIdParamSchema,
   todoListResponseSchema,
@@ -21,7 +23,7 @@ import type { z } from "zod";
 
 import type { DatabaseError, NotFoundError, ValidationError } from "../db/errors.js";
 import type { Db, PaginatedTodos, TodoPagination } from "./todo.repository.js";
-import { deleteTodoById, getTodoById, listTodos } from "./todo.repository.js";
+import { deleteCompletedTodos, deleteTodoById, getTodoById, listTodos } from "./todo.repository.js";
 import {
   createTodoService,
   patchTodoService,
@@ -169,6 +171,40 @@ export function parsePagination(
   return ok({ page: pageResult.value, pageSize: pageSizeResult.value });
 }
 
+export function parseDeleteCompletedSelector(
+  rawStatus: unknown,
+  rawSearch: unknown,
+  rawPage: unknown,
+  rawPageSize: unknown,
+): Result<void, QueryValidationError> {
+  const unsupported = (
+    [
+      ["search", rawSearch],
+      ["page", rawPage],
+      ["pageSize", rawPageSize],
+    ] as const
+  )
+    .filter(([, value]) => value !== undefined)
+    .map(([name]) => `${name} is not supported on DELETE /todos`);
+
+  if (unsupported.length > 0) {
+    return err({ type: "request_validation", issues: unsupported });
+  }
+
+  if (rawStatus === undefined) {
+    return err({
+      type: "request_validation",
+      issues: ["status is required and must be completed"],
+    });
+  }
+
+  if (rawStatus !== "completed") {
+    return err({ type: "request_validation", issues: ["status must be completed"] });
+  }
+
+  return ok(undefined);
+}
+
 export function parseTodoId(rawId: unknown): Result<string, QueryValidationError> {
   const parsed = todoIdParamSchema.safeParse(rawId);
 
@@ -302,6 +338,34 @@ export function toSetAllTodosCompletedResponse(
     .exhaustive();
 }
 
+type ClearCompletedTodosRouteResponse =
+  | { status: 200; body: ClearCompletedTodosResponse }
+  | { status: 400; body: { error: { type: "validation"; issues: string[] } } }
+  | { status: 500; body: InternalErrorResponse };
+
+export function toClearCompletedTodosResponse(
+  result: Result<{ deletedCount: number }, RequestValidationError | DatabaseError>,
+): ClearCompletedTodosRouteResponse {
+  if (result.isOk()) {
+    const validated = clearCompletedTodosResponseSchema.safeParse(result.value);
+
+    return validated.success
+      ? { status: 200, body: validated.data }
+      : { status: 500, body: internalErrorBody };
+  }
+
+  return match(result.error)
+    .with({ type: "request_validation" }, ({ issues }): ClearCompletedTodosRouteResponse => ({
+      status: 400,
+      body: { error: { type: "validation", issues } },
+    }))
+    .with({ type: "database" }, (): ClearCompletedTodosRouteResponse => ({
+      status: 500,
+      body: internalErrorBody,
+    }))
+    .exhaustive();
+}
+
 type DeleteTodoResponse =
   | { status: 204; body: undefined }
   | { status: 404; body: NotFoundErrorResponse }
@@ -398,6 +462,36 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
     }
 
     const { status, body } = toSetAllTodosCompletedResponse(result);
+    return reply.status(status).send(body);
+  });
+
+  app.delete("/todos", async (request, reply) => {
+    const query = request.query as {
+      status?: unknown;
+      search?: unknown;
+      page?: unknown;
+      pageSize?: unknown;
+    };
+    const selectorResult = parseDeleteCompletedSelector(
+      query.status,
+      query.search,
+      query.page,
+      query.pageSize,
+    );
+
+    if (selectorResult.isErr()) {
+      return reply
+        .status(400)
+        .send({ error: { type: "validation", issues: selectorResult.error.issues } });
+    }
+
+    const result = await deleteCompletedTodos(db);
+
+    if (result.isErr()) {
+      request.log.error({ err: result.error }, "DELETE /todos failed");
+    }
+
+    const { status, body } = toClearCompletedTodosResponse(result);
     return reply.status(status).send(body);
   });
 

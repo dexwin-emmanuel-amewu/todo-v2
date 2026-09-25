@@ -93,6 +93,14 @@ curl -X DELETE http://localhost:3000/todos/5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a
 
 Success: 204 with no body. Failure: 400 with `{ "error": { "type": "validation", "issues": string[] } }` for a malformed id, 404 with `{ "error": { "type": "not_found" } }` when the id is well-formed but matches no todo, 500 with `{ "error": { "type": "internal" } }` for a server-side failure.
 
+DELETE /todos?status=completed removes every completed todo in one statement. The `status=completed` selector is required: a bare `DELETE /todos` is rejected, and so are `status=all`, `status=active`, any other value, a repeated `status`, and the `search`/`page`/`pageSize` params. When the selector is accepted the whole collection is cleared, whatever page or search the caller was looking at. Active todos are left alone. This is a hard delete, same as `DELETE /todos/:todoId`.
+
+```
+curl -X DELETE "http://localhost:3000/todos?status=completed"
+```
+
+Success: 200 with `{ "deletedCount": number }`, the count of todos actually removed. Nothing completed, or an empty collection, returns 200 with `{ "deletedCount": 0 }`, so a repeat call is a no-op. Failure: 400 with `{ "error": { "type": "validation", "issues": string[] } }` for a missing, wrong, duplicate, or unsupported query param, with nothing deleted, 500 with `{ "error": { "type": "internal" } }` for a server-side failure.
+
 ## Tests
 
 apps/api's tests need Postgres running (pnpm docker:up). They create their own disposable database per run and drop it when done, so they won't touch your local data.

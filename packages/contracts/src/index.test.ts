@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  clearCompletedTodosResponseSchema,
   notFoundErrorResponseSchema,
   patchTodoSchema,
   replaceTodoSchema,
@@ -238,5 +239,19 @@ describe("notFoundErrorResponseSchema", () => {
     if (result.success) {
       expect(result.data.error).toEqual({ type: "not_found" });
     }
+  });
+});
+
+describe("clearCompletedTodosResponseSchema", () => {
+  it.each([0, 7])("accepts a deletedCount of %i", (deletedCount) => {
+    expect(clearCompletedTodosResponseSchema.safeParse({ deletedCount }).success).toBe(true);
+  });
+
+  it.each([-1, 1.5])("rejects a deletedCount of %s", (deletedCount) => {
+    expect(clearCompletedTodosResponseSchema.safeParse({ deletedCount }).success).toBe(false);
+  });
+
+  it("rejects a body with no deletedCount", () => {
+    expect(clearCompletedTodosResponseSchema.safeParse({}).success).toBe(false);
   });
 });
