@@ -115,6 +115,13 @@ export function deleteTodoById(
   );
 }
 
+export function deleteCompletedTodos(db: Db): ResultAsync<{ deletedCount: number }, DatabaseError> {
+  return ResultAsync.fromPromise(
+    db.delete(todos).where(eq(todos.completed, true)).returning({ id: todos.id }),
+    toDatabaseError,
+  ).map((rows) => ({ deletedCount: rows.length }));
+}
+
 export function setAllTodosCompleted(
   db: Db,
   completed: boolean,
