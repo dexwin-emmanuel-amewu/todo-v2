@@ -1,4 +1,5 @@
 import {
+  clearCompletedTodosResponseSchema,
   internalErrorResponseSchema,
   notFoundErrorResponseSchema,
   setAllTodosCompletedResponseSchema,
@@ -26,10 +27,12 @@ import {
   setAllTodosCompletedService,
 } from "./todo.service.js";
 import {
+  parseDeleteCompletedSelector,
   parsePagination,
   parseSearchQuery,
   parseStatusFilter,
   parseTodoId,
+  toClearCompletedTodosResponse,
   toCreateTodoResponse,
   toDeleteTodoResponse,
   toGetTodoResponse,
@@ -1551,5 +1554,293 @@ describe("replaceTodoService", () => {
         });
       });
     });
+  });
+});
+
+describe("parseDeleteCompletedSelector", () => {
+  it("accepts status=completed on its own", () => {
+    const result = parseDeleteCompletedSelector("completed", undefined, undefined, undefined);
+
+    expect(result.isOk()).toBe(true);
+  });
+
+  it("rejects a missing status, so a bare collection delete never runs", () => {
+    const result = parseDeleteCompletedSelector(undefined, undefined, undefined, undefined);
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.type).toBe("request_validation");
+    }
+  });
+
+  it.each(["all", "active", "banana", ""])("rejects status=%s", (value) => {
+    const result = parseDeleteCompletedSelector(value, undefined, undefined, undefined);
+
+    expect(result.isErr()).toBe(true);
+  });
+
+  it("rejects a repeated status, the array shape fastify produces", () => {
+    const result = parseDeleteCompletedSelector(
+      ["completed", "completed"],
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    expect(result.isErr()).toBe(true);
+  });
+
+  it.each([
+    ["search", ["completed", "oat", undefined, undefined]],
+    ["page", ["completed", undefined, "1", undefined]],
+    ["pageSize", ["completed", undefined, undefined, "10"]],
+  ])("rejects an unsupported %s param even with status=completed", (_name, args) => {
+    const [status, search, page, pageSize] = args;
+    const result = parseDeleteCompletedSelector(status, search, page, pageSize);
+
+    expect(result.isErr()).toBe(true);
+  });
+});
+
+describe("toClearCompletedTodosResponse", () => {
+  it("maps a successful clear to 200 with the deleted count", () => {
+    const response = toClearCompletedTodosResponse(ok({ deletedCount: 2 }));
+
+    expect(response.status).toBe(200);
+    expect(clearCompletedTodosResponseSchema.safeParse(response.body).success).toBe(true);
+    expect(response.body).toEqual({ deletedCount: 2 });
+  });
+
+  it("maps a selector validation error to 400", () => {
+    const response = toClearCompletedTodosResponse(
+      err({ type: "request_validation", issues: ["status must be completed"] }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it("maps a database error to 500", () => {
+    const response = toClearCompletedTodosResponse(
+      err({ type: "database", cause: new Error("boom") }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(internalErrorResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+});
+
+describe("DELETE /todos?status=completed", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("deletes every completed todo, keeps the active ones, and returns the count", async () => {
+    const app = buildApp(database.db);
+    const seeded: Todo[] = [];
+
+    for (const title of [
+      "First seeded todo",
+      "Second seeded todo",
+      "Third seeded todo",
+      "Fourth seeded todo",
+      "Fifth seeded todo",
+    ]) {
+      const created = await createTodo(database.db, { title });
+      if (created.isErr()) throw created.error;
+      seeded.push(created.value);
+    }
+
+    const [firstCompleted, secondCompleted, ...stillActive] = seeded as [Todo, Todo, ...Todo[]];
+
+    for (const todo of [firstCompleted, secondCompleted]) {
+      await app.inject({
+        method: "PATCH",
+        url: `/todos/${todo.id}`,
+        payload: { completed: true },
+      });
+    }
+
+    const response = await app.inject({ method: "DELETE", url: "/todos?status=completed" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ deletedCount: 2 });
+
+    for (const gone of [firstCompleted, secondCompleted]) {
+      const found = await app.inject({ method: "GET", url: `/todos/${gone.id}` });
+      expect(found.statusCode).toBe(404);
+      expect(notFoundErrorResponseSchema.safeParse(found.json()).success).toBe(true);
+    }
+
+    for (const survivor of stillActive) {
+      const found = await app.inject({ method: "GET", url: `/todos/${survivor.id}` });
+      expect(found.statusCode).toBe(200);
+      expect(found.json()).toEqual(survivor);
+    }
+
+    const completed = await app.inject({ method: "GET", url: "/todos?status=completed" });
+    const active = await app.inject({ method: "GET", url: "/todos?status=active" });
+    expect(completed.json().totalItems).toBe(0);
+    expect(active.json().totalItems).toBe(3);
+  });
+
+  it("deletes completed todos beyond the first page, ignoring pagination state", async () => {
+    const app = buildApp(database.db);
+
+    for (const title of [
+      "Sixth seeded todo",
+      "Seventh seeded todo",
+      "Eighth seeded todo",
+      "Ninth seeded todo",
+    ]) {
+      const created = await createTodo(database.db, { title });
+      if (created.isErr()) throw created.error;
+      await app.inject({
+        method: "PATCH",
+        url: `/todos/${created.value.id}`,
+        payload: { completed: true },
+      });
+    }
+
+    const firstPage = await app.inject({
+      method: "GET",
+      url: "/todos?status=completed&page=1&pageSize=2",
+    });
+    expect(firstPage.json().items).toHaveLength(2);
+    expect(firstPage.json().totalItems).toBe(4);
+
+    const response = await app.inject({ method: "DELETE", url: "/todos?status=completed" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ deletedCount: 4 });
+
+    const completed = await app.inject({ method: "GET", url: "/todos?status=completed" });
+    expect(completed.json().totalItems).toBe(0);
+  });
+
+  it("deletes completed todos that no search would match, ignoring search state", async () => {
+    const app = buildApp(database.db);
+    const matching = await createTodo(database.db, { title: "Buy oat milk today" });
+    const other = await createTodo(database.db, { title: "Completely different title" });
+    if (matching.isErr() || other.isErr()) throw new Error("setup failed");
+
+    for (const todo of [matching.value, other.value]) {
+      await app.inject({
+        method: "PATCH",
+        url: `/todos/${todo.id}`,
+        payload: { completed: true },
+      });
+    }
+
+    const response = await app.inject({ method: "DELETE", url: "/todos?status=completed" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ deletedCount: 2 });
+
+    const searched = await app.inject({ method: "GET", url: "/todos?search=oat" });
+    expect(searched.json().totalItems).toBe(0);
+  });
+
+  it("returns 200 with deletedCount: 0 when nothing is completed", async () => {
+    const app = buildApp(database.db);
+    const before = await app.inject({ method: "GET", url: "/todos" });
+
+    const response = await app.inject({ method: "DELETE", url: "/todos?status=completed" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ deletedCount: 0 });
+
+    const after = await app.inject({ method: "GET", url: "/todos" });
+    expect(after.json().totalItems).toBe(before.json().totalItems);
+  });
+
+  it("returns deletedCount: 0 on an immediate repeat call", async () => {
+    const app = buildApp(database.db);
+    const created = await createTodo(database.db, { title: "Clear me twice over http" });
+    if (created.isErr()) throw created.error;
+    await app.inject({
+      method: "PATCH",
+      url: `/todos/${created.value.id}`,
+      payload: { completed: true },
+    });
+
+    const first = await app.inject({ method: "DELETE", url: "/todos?status=completed" });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().deletedCount).toBeGreaterThan(0);
+
+    const second = await app.inject({ method: "DELETE", url: "/todos?status=completed" });
+    expect(second.statusCode).toBe(200);
+    expect(second.json()).toEqual({ deletedCount: 0 });
+  });
+
+  it.each([
+    ["no query string", "/todos"],
+    ["status=all", "/todos?status=all"],
+    ["status=active", "/todos?status=active"],
+    ["status=banana", "/todos?status=banana"],
+    ["an empty status", "/todos?status="],
+    ["a repeated status", "/todos?status=completed&status=completed"],
+    ["a search param", "/todos?status=completed&search=oat"],
+    ["a page param", "/todos?status=completed&page=1"],
+    ["a pageSize param", "/todos?status=completed&pageSize=10"],
+  ])("returns 400 for %s, and deletes nothing", async (_name, url) => {
+    const app = buildApp(database.db);
+    const created = await createTodo(database.db, { title: "Must survive a rejected delete" });
+    if (created.isErr()) throw created.error;
+    await app.inject({
+      method: "PATCH",
+      url: `/todos/${created.value.id}`,
+      payload: { completed: true },
+    });
+
+    const before = await app.inject({ method: "GET", url: "/todos" });
+
+    const response = await app.inject({ method: "DELETE", url });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+
+    const after = await app.inject({ method: "GET", url: "/todos" });
+    expect(after.json().totalItems).toBe(before.json().totalItems);
+
+    await app.inject({ method: "DELETE", url: `/todos/${created.value.id}` });
+  });
+
+  it("does not shadow DELETE /todos/:todoId", async () => {
+    const app = buildApp(database.db);
+    const created = await createTodo(database.db, { title: "Deleted by id, not in bulk" });
+    if (created.isErr()) throw created.error;
+
+    const response = await app.inject({ method: "DELETE", url: `/todos/${created.value.id}` });
+
+    expect(response.statusCode).toBe(204);
+  });
+});
+
+describe("DELETE /todos?status=completed, empty collection", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("returns 200 with deletedCount: 0 when there are no todos", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "DELETE", url: "/todos?status=completed" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ deletedCount: 0 });
   });
 });
