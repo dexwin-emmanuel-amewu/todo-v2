@@ -4,7 +4,7 @@ import {
   type TodoStatusFilter,
   todoSchema,
 } from "@todo/contracts";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, ilike } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { match } from "ts-pattern";
@@ -17,6 +17,10 @@ export type Db = NodePgDatabase<typeof schema>;
 
 function toDatabaseError(cause: unknown): DatabaseError {
   return { type: "database", cause };
+}
+
+function escapeLikePattern(term: string): string {
+  return term.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
 function toRow(row: typeof todos.$inferSelect): Result<Todo, ValidationError> {
@@ -62,12 +66,17 @@ export function getTodoById(
 export function listTodos(
   db: Db,
   filter: TodoStatusFilter = "all",
+  search?: string,
 ): ResultAsync<Todo[], DatabaseError | ValidationError> {
-  const condition = match(filter)
+  const statusCondition = match(filter)
     .with("active", () => eq(todos.completed, false))
     .with("completed", () => eq(todos.completed, true))
     .with("all", () => undefined)
     .exhaustive();
+
+  const searchCondition = search ? ilike(todos.title, `%${escapeLikePattern(search)}%`) : undefined;
+
+  const condition = and(statusCondition, searchCondition);
 
   return ResultAsync.fromPromise(
     db.select().from(todos).where(condition).orderBy(asc(todos.createdAt), asc(todos.id)),
