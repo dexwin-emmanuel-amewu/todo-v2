@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { todos } from "../db/schema.js";
@@ -97,6 +98,63 @@ describe("todos repository, createdAt ties", () => {
     if (listed.isErr()) throw listed.error;
 
     expect(listed.value.map((todo) => todo.id)).toEqual(expectedIds);
+  });
+});
+
+describe("todos repository, status filter", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("filters to only active (incomplete) todos", async () => {
+    const active = await createTodo(database.db, { title: "Still active todo" });
+    const completed = await createTodo(database.db, { title: "Finished todo" });
+    if (active.isErr() || completed.isErr()) throw new Error("setup failed");
+    await database.db
+      .update(todos)
+      .set({ completed: true })
+      .where(eq(todos.id, completed.value.id));
+
+    const listed = await listTodos(database.db, "active");
+    if (listed.isErr()) throw listed.error;
+
+    const ids = listed.value.map((todo) => todo.id);
+    expect(ids).toContain(active.value.id);
+    expect(ids).not.toContain(completed.value.id);
+    expect(listed.value.every((todo) => todo.completed === false)).toBe(true);
+  });
+
+  it("filters to only completed todos", async () => {
+    const active = await createTodo(database.db, { title: "Another active todo" });
+    const completed = await createTodo(database.db, { title: "Another finished todo" });
+    if (active.isErr() || completed.isErr()) throw new Error("setup failed");
+    await database.db
+      .update(todos)
+      .set({ completed: true })
+      .where(eq(todos.id, completed.value.id));
+
+    const listed = await listTodos(database.db, "completed");
+    if (listed.isErr()) throw listed.error;
+
+    const ids = listed.value.map((todo) => todo.id);
+    expect(ids).toContain(completed.value.id);
+    expect(ids).not.toContain(active.value.id);
+    expect(listed.value.every((todo) => todo.completed === true)).toBe(true);
+  });
+
+  it("returns every todo for the all filter, same as no filter", async () => {
+    const unfiltered = await listTodos(database.db);
+    const explicitAll = await listTodos(database.db, "all");
+    if (unfiltered.isErr() || explicitAll.isErr()) throw new Error("setup failed");
+
+    expect(explicitAll.value).toEqual(unfiltered.value);
   });
 });
 
