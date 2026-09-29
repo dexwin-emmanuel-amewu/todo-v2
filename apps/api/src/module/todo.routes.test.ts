@@ -1973,7 +1973,6 @@ describe("DELETE /todos?status=completed, empty collection", () => {
       });
     });
   });
-});
 
 describe("parseDeleteCompletedSelector", () => {
   it("accepts status=completed on its own", () => {
