@@ -1,8 +1,8 @@
-import { createTodoSchema, replaceTodoSchema, type Todo } from "@todo/contracts";
+import { createTodoSchema, patchTodoSchema, replaceTodoSchema, type Todo } from "@todo/contracts";
 import { errAsync, type ResultAsync } from "neverthrow";
 
 import type { DatabaseError, NotFoundError, ValidationError } from "../db/errors.js";
-import { createTodo, type Db, replaceTodoById } from "./todo.repository.js";
+import { createTodo, type Db, patchTodoById, replaceTodoById } from "./todo.repository.js";
 
 export type RequestValidationError = { type: "request_validation"; issues: string[] };
 
@@ -21,8 +21,6 @@ export function createTodoService(
 
   return createTodo(db, parsed.data);
 }
-<<<<<<< Updated upstream
-=======
 
 export function replaceTodoService(
   db: Db,
@@ -57,4 +55,3 @@ export function patchTodoService(
 
   return patchTodoById(db, id, parsed.data);
 }
->>>>>>> Stashed changes
