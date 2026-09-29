@@ -18,12 +18,8 @@ import {
   migrateDisposableDatabase,
 } from "../db/test-db";
 import { buildApp } from "./app.js";
-<<<<<<< Updated upstream
-import { createTodo } from "./todo.repository.js";
-=======
 import { createTodo, getTodoById } from "./todo.repository.js";
 import { patchTodoService, replaceTodoService } from "./todo.service.js";
->>>>>>> Stashed changes
 import {
   parsePagination,
   parseSearchQuery,
@@ -613,8 +609,6 @@ describe("toGetTodoResponse", () => {
   });
 });
 
-<<<<<<< Updated upstream
-=======
 describe("toReplaceTodoResponse", () => {
   it("maps a successful replace to 200 with the updated todo", () => {
     const response = toReplaceTodoResponse(ok(exampleTodo));
@@ -782,7 +776,6 @@ describe("patchTodoService", () => {
   });
 });
 
->>>>>>> Stashed changes
 describe("GET /todos/:todoId", () => {
   let database: DisposableDatabase;
   let firstId: string;

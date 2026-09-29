@@ -20,16 +20,12 @@ import type { z } from "zod";
 import type { DatabaseError, NotFoundError, ValidationError } from "../db/errors.js";
 import type { Db, PaginatedTodos, TodoPagination } from "./todo.repository.js";
 import { getTodoById, listTodos } from "./todo.repository.js";
-<<<<<<< Updated upstream
-import { createTodoService, type RequestValidationError } from "./todo.service.js";
-=======
 import {
   createTodoService,
   patchTodoService,
   replaceTodoService,
   type RequestValidationError,
 } from "./todo.service.js";
->>>>>>> Stashed changes
 
 const internalErrorBody: InternalErrorResponse = { error: { type: "internal" } };
 const notFoundErrorBody: NotFoundErrorResponse = { error: { type: "not_found" } };
@@ -269,6 +265,12 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
       request.log.error({ err: result.error }, message);
     }
 
+    const result = await listTodos(
+      db,
+      filterResult.value,
+      searchResult.value,
+      paginationResult.value,
+    );
     const { status, body } = toListTodosResponse(result);
     return reply.status(status).send(body);
   });
@@ -296,8 +298,6 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
     const { status, body } = toGetTodoResponse(result);
     return reply.status(status).send(body);
   });
-<<<<<<< Updated upstream
-=======
 
   app.put("/todos/:todoId", async (request, reply) => {
     const params = request.params as { todoId?: unknown };
@@ -346,5 +346,4 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
     const { status, body } = toPatchTodoResponse(result);
     return reply.status(status).send(body);
   });
->>>>>>> Stashed changes
 }
