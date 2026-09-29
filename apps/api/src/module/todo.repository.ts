@@ -1,5 +1,6 @@
 import {
   type CreateTodoInput,
+  type PatchTodoInput,
   type ReplaceTodoInput,
   type Todo,
   type TodoStatusFilter,
@@ -80,6 +81,38 @@ export function replaceTodoById(
     const row = rows[0];
     return row ? toRow(row) : err<Todo, NotFoundError>({ type: "not_found", id });
   });
+}
+
+export function patchTodoById(
+  db: Db,
+  id: string,
+  input: PatchTodoInput,
+): ResultAsync<Todo, DatabaseError | NotFoundError | ValidationError> {
+  const patch = {
+    ...(input.title !== undefined ? { title: input.title } : {}),
+    ...(input.completed !== undefined ? { completed: input.completed } : {}),
+    updatedAt: sql`now()`,
+  };
+
+  return ResultAsync.fromPromise(
+    db.update(todos).set(patch).where(eq(todos.id, id)).returning(),
+    toDatabaseError,
+  ).andThen((rows) => {
+    const row = rows[0];
+    return row ? toRow(row) : err<Todo, NotFoundError>({ type: "not_found", id });
+  });
+}
+
+export function deleteTodoById(
+  db: Db,
+  id: string,
+): ResultAsync<void, DatabaseError | NotFoundError> {
+  return ResultAsync.fromPromise(
+    db.delete(todos).where(eq(todos.id, id)).returning({ id: todos.id }),
+    toDatabaseError,
+  ).andThen((rows) =>
+    rows[0] ? ok(undefined) : err<void, NotFoundError>({ type: "not_found", id }),
+  );
 }
 
 export type TodoPagination = { page: number; pageSize: number };

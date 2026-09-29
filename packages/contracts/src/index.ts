@@ -17,6 +17,15 @@ export const replaceTodoSchema = todoSchema.pick({ title: true, completed: true 
 
 export type ReplaceTodoInput = z.infer<typeof replaceTodoSchema>;
 
+export const patchTodoSchema = todoSchema
+  .pick({ title: true, completed: true })
+  .partial()
+  .refine((data) => Object.keys(data).length > 0, {
+    message: "At least one field must be provided",
+  });
+
+export type PatchTodoInput = z.infer<typeof patchTodoSchema>;
+
 export const todoIdParamSchema = z.uuid();
 
 export type TodoIdParam = z.infer<typeof todoIdParamSchema>;
