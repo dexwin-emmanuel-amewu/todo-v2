@@ -131,6 +131,11 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
     }
 
     const result = await listTodos(db, filterResult.value, searchResult.value);
+
+    if (result.isErr()) {
+      request.log.error({ err: result.error }, "GET /todos failed");
+    }
+
     const { status, body } = toListTodosResponse(result);
     return reply.status(status).send(body);
   });
