@@ -13,6 +13,10 @@ export const createTodoSchema = todoSchema.pick({ title: true });
 
 export type CreateTodoInput = z.infer<typeof createTodoSchema>;
 
+export const todoIdParamSchema = z.uuid();
+
+export type TodoIdParam = z.infer<typeof todoIdParamSchema>;
+
 export const todoStatusFilterSchema = z.enum(["all", "active", "completed"]);
 
 export type TodoStatusFilter = z.infer<typeof todoStatusFilterSchema>;
@@ -47,6 +51,14 @@ export const validationErrorResponseSchema = z.object({
 });
 
 export type ValidationErrorResponse = z.infer<typeof validationErrorResponseSchema>;
+
+export const notFoundErrorResponseSchema = z.object({
+  error: z.object({
+    type: z.literal("not_found"),
+  }),
+});
+
+export type NotFoundErrorResponse = z.infer<typeof notFoundErrorResponseSchema>;
 
 export const internalErrorResponseSchema = z.object({
   error: z.object({
