@@ -10,6 +10,7 @@ import {
 } from "../db/test-db";
 import {
   createTodo,
+  deleteCompletedTodos,
   deleteTodoById,
   getTodoById,
   listTodos,
@@ -759,5 +760,120 @@ describe("todos repository, empty database", () => {
     if (result.isErr()) throw result.error;
 
     expect(result.value).toEqual({ updatedCount: 0 });
+  });
+});
+
+describe("todos repository, deleteCompletedTodos", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("deletes every completed todo and leaves the active ones untouched", async () => {
+    const firstCompleted = await createTodo(database.db, { title: "First completed todo" });
+    const secondCompleted = await createTodo(database.db, { title: "Second completed todo" });
+    const firstActive = await createTodo(database.db, { title: "First active todo" });
+    const secondActive = await createTodo(database.db, { title: "Second active todo" });
+    const thirdActive = await createTodo(database.db, { title: "Third active todo" });
+    if (
+      firstCompleted.isErr() ||
+      secondCompleted.isErr() ||
+      firstActive.isErr() ||
+      secondActive.isErr() ||
+      thirdActive.isErr()
+    ) {
+      throw new Error("setup failed");
+    }
+
+    for (const completed of [firstCompleted.value, secondCompleted.value]) {
+      await database.db.update(todos).set({ completed: true }).where(eq(todos.id, completed.id));
+    }
+
+    const result = await deleteCompletedTodos(database.db);
+    if (result.isErr()) throw result.error;
+
+    expect(result.value).toEqual({ deletedCount: 2 });
+
+    for (const gone of [firstCompleted.value, secondCompleted.value]) {
+      const found = await getTodoById(database.db, gone.id);
+      expect(found.isErr()).toBe(true);
+    }
+
+    for (const survivor of [firstActive.value, secondActive.value, thirdActive.value]) {
+      const found = await getTodoById(database.db, survivor.id);
+      if (found.isErr()) throw found.error;
+      expect(found.value).toEqual(survivor);
+    }
+  });
+
+  it("returns deletedCount: 0 and deletes nothing when no todo is completed", async () => {
+    const before = await listTodos(database.db);
+    if (before.isErr()) throw before.error;
+
+    const result = await deleteCompletedTodos(database.db);
+    if (result.isErr()) throw result.error;
+
+    expect(result.value).toEqual({ deletedCount: 0 });
+
+    const after = await listTodos(database.db);
+    if (after.isErr()) throw after.error;
+    expect(after.value.totalItems).toBe(before.value.totalItems);
+  });
+
+  it("returns deletedCount: 0 on an immediate repeat call", async () => {
+    const created = await createTodo(database.db, { title: "Completed then cleared" });
+    if (created.isErr()) throw created.error;
+    await database.db.update(todos).set({ completed: true }).where(eq(todos.id, created.value.id));
+
+    const first = await deleteCompletedTodos(database.db);
+    if (first.isErr()) throw first.error;
+    expect(first.value.deletedCount).toBeGreaterThan(0);
+
+    const second = await deleteCompletedTodos(database.db);
+    if (second.isErr()) throw second.error;
+    expect(second.value).toEqual({ deletedCount: 0 });
+  });
+
+  it("empties the table when every todo is completed", async () => {
+    await database.db.update(todos).set({ completed: true });
+
+    const before = await listTodos(database.db);
+    if (before.isErr()) throw before.error;
+    expect(before.value.totalItems).toBeGreaterThan(0);
+
+    const result = await deleteCompletedTodos(database.db);
+    if (result.isErr()) throw result.error;
+
+    expect(result.value).toEqual({ deletedCount: before.value.totalItems });
+
+    const after = await listTodos(database.db);
+    if (after.isErr()) throw after.error;
+    expect(after.value.items).toEqual([]);
+  });
+});
+
+describe("todos repository, deleteCompletedTodos, empty database", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("returns deletedCount: 0 when there are no todos at all", async () => {
+    const result = await deleteCompletedTodos(database.db);
+    if (result.isErr()) throw result.error;
+
+    expect(result.value).toEqual({ deletedCount: 0 });
   });
 });
