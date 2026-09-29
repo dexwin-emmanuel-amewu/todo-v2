@@ -55,6 +55,16 @@ curl http://localhost:3000/todos/5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a
 
 Success: 200 with the todo object on its own, not wrapped in an envelope. Failure: 400 with `{ "error": { "type": "validation", "issues": string[] } }` when the id is not a well-formed UUID, 404 with `{ "error": { "type": "not_found" } }` when the id is well-formed but matches no todo, 500 with `{ "error": { "type": "internal" } }` for a server-side failure. A malformed id is always a 400 and never a 404, and the 404 body does not echo the requested id back.
 
+PUT /todos/:todoId replaces a todo's `title` and `completed`. Body: `{ "title": string, "completed": boolean }` (title 6-100 chars after trimming). Both fields are required — this is a full replacement, not a partial update. `id` and `createdAt` never change; extra body fields are ignored.
+
+```
+curl -X PUT http://localhost:3000/todos/5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Buy oat milk", "completed": true}'
+```
+
+Success: 200 with the updated todo. Failure: 400 with `{ "error": { "type": "validation", "issues": string[] } }` for a malformed id or an invalid body (the id check runs first, so a bad id and a bad body together return only the id's 400), 404 with `{ "error": { "type": "not_found" } }` when the id is well-formed but matches no todo (no row is created), 500 with `{ "error": { "type": "internal" } }` for a server-side failure.
+
 ## Tests
 
 apps/api's tests need Postgres running (pnpm docker:up). They create their own disposable database per run and drop it when done, so they won't touch your local data.

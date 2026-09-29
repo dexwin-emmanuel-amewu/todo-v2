@@ -8,7 +8,7 @@ import {
   dropDisposableDatabase,
   migrateDisposableDatabase,
 } from "../db/test-db";
-import { createTodo, getTodoById, listTodos } from "../module/todo.repository.js";
+import { createTodo, getTodoById, listTodos, replaceTodoById } from "../module/todo.repository.js";
 
 describe("todos repository", () => {
   let database: DisposableDatabase;
@@ -325,6 +325,107 @@ describe("todos repository, empty pagination", () => {
     expect(listed.value.items).toEqual([]);
     expect(listed.value.totalItems).toBe(0);
     expect(listed.value.totalPages).toBe(0);
+  });
+});
+
+describe("todos repository, replaceTodoById", () => {
+  let database: DisposableDatabase;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("updates title and completed and returns the updated row", async () => {
+    const created = await createTodo(database.db, { title: "Original title" });
+    if (created.isErr()) throw created.error;
+
+    const replaced = await replaceTodoById(database.db, created.value.id, {
+      title: "Replaced title",
+      completed: true,
+    });
+    if (replaced.isErr()) throw replaced.error;
+
+    expect(replaced.value.title).toBe("Replaced title");
+    expect(replaced.value.completed).toBe(true);
+  });
+
+  it("leaves id and createdAt unchanged", async () => {
+    const created = await createTodo(database.db, { title: "Keep my id and createdAt" });
+    if (created.isErr()) throw created.error;
+
+    const replaced = await replaceTodoById(database.db, created.value.id, {
+      title: "New title",
+      completed: true,
+    });
+    if (replaced.isErr()) throw replaced.error;
+
+    expect(replaced.value.id).toBe(created.value.id);
+    expect(replaced.value.createdAt).toBe(created.value.createdAt);
+  });
+
+  it("changes updated_at to a later timestamp", async () => {
+    const created = await createTodo(database.db, { title: "Check updated_at bumps" });
+    if (created.isErr()) throw created.error;
+
+    const before = await database.db
+      .select({ updatedAt: todos.updatedAt })
+      .from(todos)
+      .where(eq(todos.id, created.value.id));
+
+    const replaced = await replaceTodoById(database.db, created.value.id, {
+      title: "New title",
+      completed: true,
+    });
+    if (replaced.isErr()) throw replaced.error;
+
+    const after = await database.db
+      .select({ updatedAt: todos.updatedAt })
+      .from(todos)
+      .where(eq(todos.id, created.value.id));
+
+    expect(after[0]!.updatedAt.getTime()).toBeGreaterThan(before[0]!.updatedAt.getTime());
+  });
+
+  it("returns not_found for a random unused id and does not insert a row", async () => {
+    const unusedId = "00000000-0000-0000-0000-000000000000";
+    const before = await listTodos(database.db);
+    if (before.isErr()) throw before.error;
+
+    const result = await replaceTodoById(database.db, unusedId, {
+      title: "Should not be created",
+      completed: false,
+    });
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error).toEqual({ type: "not_found", id: unusedId });
+    }
+
+    const after = await listTodos(database.db);
+    if (after.isErr()) throw after.error;
+    expect(after.value.totalItems).toBe(before.value.totalItems);
+  });
+
+  it("updates only the targeted row, leaving the other todo unchanged", async () => {
+    const target = await createTodo(database.db, { title: "Target todo" });
+    const other = await createTodo(database.db, { title: "Untouched todo" });
+    if (target.isErr() || other.isErr()) throw new Error("setup failed");
+
+    const replaced = await replaceTodoById(database.db, target.value.id, {
+      title: "Target todo, replaced",
+      completed: true,
+    });
+    if (replaced.isErr()) throw replaced.error;
+
+    const untouched = await getTodoById(database.db, other.value.id);
+    if (untouched.isErr()) throw untouched.error;
+
+    expect(untouched.value).toEqual(other.value);
   });
 });
 
