@@ -7,7 +7,7 @@ import type { DatabaseError, NotFoundError, ValidationError } from "../db/errors
 import { todos } from "../db/schema.js";
 import type * as schema from "../db/schema.js";
 
-type Db = NodePgDatabase<typeof schema>;
+export type Db = NodePgDatabase<typeof schema>;
 
 function toDatabaseError(cause: unknown): DatabaseError {
   return { type: "database", cause };
