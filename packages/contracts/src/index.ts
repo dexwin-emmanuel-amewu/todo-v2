@@ -13,12 +13,6 @@ export const createTodoSchema = todoSchema.pick({ title: true });
 
 export type CreateTodoInput = z.infer<typeof createTodoSchema>;
 
-export const todoListResponseSchema = z.object({
-  items: z.array(todoSchema),
-});
-
-export type TodoListResponse = z.infer<typeof todoListResponseSchema>;
-
 export const todoStatusFilterSchema = z.enum(["all", "active", "completed"]);
 
 export type TodoStatusFilter = z.infer<typeof todoStatusFilterSchema>;
@@ -26,6 +20,24 @@ export type TodoStatusFilter = z.infer<typeof todoStatusFilterSchema>;
 export const todoSearchQuerySchema = z.string().trim().max(100);
 
 export type TodoSearchQuery = z.infer<typeof todoSearchQuerySchema>;
+
+export const todoPageQuerySchema = z.coerce.number().int().min(1);
+
+export type TodoPageQuery = z.infer<typeof todoPageQuerySchema>;
+
+export const todoPageSizeQuerySchema = z.coerce.number().int().min(1).max(100);
+
+export type TodoPageSizeQuery = z.infer<typeof todoPageSizeQuerySchema>;
+
+export const todoListResponseSchema = z.object({
+  items: z.array(todoSchema),
+  page: z.number().int().min(1),
+  pageSize: z.number().int().min(1).max(100),
+  totalItems: z.number().int().min(0),
+  totalPages: z.number().int().min(0),
+});
+
+export type TodoListResponse = z.infer<typeof todoListResponseSchema>;
 
 export const validationErrorResponseSchema = z.object({
   error: z.object({
