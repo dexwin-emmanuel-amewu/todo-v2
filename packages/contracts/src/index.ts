@@ -13,6 +13,10 @@ export const createTodoSchema = todoSchema.pick({ title: true });
 
 export type CreateTodoInput = z.infer<typeof createTodoSchema>;
 
+export const replaceTodoSchema = todoSchema.pick({ title: true, completed: true });
+
+export type ReplaceTodoInput = z.infer<typeof replaceTodoSchema>;
+
 export const todoIdParamSchema = z.uuid();
 
 export type TodoIdParam = z.infer<typeof todoIdParamSchema>;

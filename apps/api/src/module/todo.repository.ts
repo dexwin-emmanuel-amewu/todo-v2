@@ -1,10 +1,11 @@
 import {
   type CreateTodoInput,
+  type ReplaceTodoInput,
   type Todo,
   type TodoStatusFilter,
   todoSchema,
 } from "@todo/contracts";
-import { and, asc, count, eq, ilike } from "drizzle-orm";
+import { and, asc, count, eq, ilike, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { match } from "ts-pattern";
@@ -56,6 +57,24 @@ export function getTodoById(
 ): ResultAsync<Todo, DatabaseError | NotFoundError | ValidationError> {
   return ResultAsync.fromPromise(
     db.select().from(todos).where(eq(todos.id, id)).limit(1),
+    toDatabaseError,
+  ).andThen((rows) => {
+    const row = rows[0];
+    return row ? toRow(row) : err<Todo, NotFoundError>({ type: "not_found", id });
+  });
+}
+
+export function replaceTodoById(
+  db: Db,
+  id: string,
+  input: ReplaceTodoInput,
+): ResultAsync<Todo, DatabaseError | NotFoundError | ValidationError> {
+  return ResultAsync.fromPromise(
+    db
+      .update(todos)
+      .set({ title: input.title, completed: input.completed, updatedAt: sql`now()` })
+      .where(eq(todos.id, id))
+      .returning(),
     toDatabaseError,
   ).andThen((rows) => {
     const row = rows[0];
