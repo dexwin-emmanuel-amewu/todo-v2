@@ -19,6 +19,10 @@ export const todoListResponseSchema = z.object({
 
 export type TodoListResponse = z.infer<typeof todoListResponseSchema>;
 
+export const todoStatusFilterSchema = z.enum(["all", "active", "completed"]);
+
+export type TodoStatusFilter = z.infer<typeof todoStatusFilterSchema>;
+
 export const validationErrorResponseSchema = z.object({
   error: z.object({
     type: z.literal("validation"),
