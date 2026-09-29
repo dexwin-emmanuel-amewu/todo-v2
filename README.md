@@ -16,6 +16,8 @@ pnpm --filter api dev
 
 Runs the Fastify API on `http://localhost:3000`. Check it's up with `curl http://localhost:3000/health`. Needs Postgres running (pnpm docker:up) and DATABASE_URL set (see .env.example).
 
+`GET /todos` returns every todo, oldest first (`created_at` ascending, `id` ascending as a tie-breaker). An empty database returns `{ "items": [] }`.
+
 **Frontend**
 
 pnpm --filter web dev (Runs on `http://localhost:5173`.)
