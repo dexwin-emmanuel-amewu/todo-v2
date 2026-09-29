@@ -2,19 +2,37 @@ import {
   type InternalErrorResponse,
   type Todo,
   type TodoListResponse,
+  type TodoStatusFilter,
   todoListResponseSchema,
+  todoStatusFilterSchema,
 } from "@todo/contracts";
 import type { FastifyInstance } from "fastify";
-import type { Result } from "neverthrow";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import { err, ok, type Result } from "neverthrow";
+import { match } from "ts-pattern";
 
 import type { DatabaseError, ValidationError } from "../db/errors.js";
-import type * as schema from "../db/schema.js";
+import type { Db } from "./todo.repository.js";
 import { listTodos } from "./todo.repository.js";
-
-type Db = NodePgDatabase<typeof schema>;
+import { createTodoFlow, type RequestValidationError } from "./todo.service.js";
 
 const internalErrorBody: InternalErrorResponse = { error: { type: "internal" } };
+
+export function toCreateTodoResponse(
+  result: Result<Todo, RequestValidationError | ValidationError | DatabaseError>,
+): { status: number; body: unknown } {
+  if (result.isOk()) {
+    return { status: 201, body: result.value };
+  }
+
+  if (result.error.type === "request_validation") {
+    return {
+      status: 400,
+      body: { error: { type: "validation", issues: result.error.issues } },
+    };
+  }
+
+  return { status: 500, body: internalErrorBody };
+}
 
 type ListTodosResponse =
   { status: 200; body: TodoListResponse } | { status: 500; body: InternalErrorResponse };
@@ -36,11 +54,55 @@ export function toListTodosResponse(
   return { status: 200, body: validated.data };
 }
 
-export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
-  app.get("/todos", async (_request, reply) => {
-    const result = await listTodos(db);
-    const { status, body } = toListTodosResponse(result);
+type StatusFilterValidationError = { type: "request_validation"; issues: string[] };
 
-    reply.status(status).send(body);
+export function parseStatusFilter(
+  rawStatus: unknown,
+): Result<TodoStatusFilter, StatusFilterValidationError> {
+  return match(rawStatus)
+    .with(undefined, (): Result<TodoStatusFilter, StatusFilterValidationError> => ok("all"))
+    .otherwise((value) => {
+      const parsed = todoStatusFilterSchema.safeParse(value);
+
+      return match(parsed)
+        .with(
+          { success: true },
+          ({ data }): Result<TodoStatusFilter, StatusFilterValidationError> => ok(data),
+        )
+        .with(
+          { success: false },
+          ({ error }): Result<TodoStatusFilter, StatusFilterValidationError> =>
+            err({
+              type: "request_validation",
+              issues: error.issues.map((issue) => issue.message),
+            }),
+        )
+        .exhaustive();
+    });
+}
+
+export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
+  app.post("/todos", async (request, reply) => {
+    const result = await createTodoFlow(db, request.body);
+
+    if (result.isErr() && result.error.type !== "request_validation") {
+      request.log.error({ err: result.error }, "POST /todos failed");
+    }
+
+    const { status, body } = toCreateTodoResponse(result);
+    return reply.code(status).send(body);
+  });
+
+  app.get("/todos", async (request, reply) => {
+    const filterResult = parseStatusFilter((request.query as { status?: unknown }).status);
+
+    return filterResult.match(
+      async (filter) => {
+        const result = await listTodos(db, filter);
+        const { status, body } = toListTodosResponse(result);
+        return reply.status(status).send(body);
+      },
+      (error) => reply.status(400).send({ error: { type: "validation", issues: error.issues } }),
+    );
   });
 }
