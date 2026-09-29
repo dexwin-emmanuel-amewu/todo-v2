@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  clearCompletedTodosResponseSchema,
   notFoundErrorResponseSchema,
   patchTodoSchema,
   replaceTodoSchema,
+  setAllTodosCompletedResponseSchema,
+  setAllTodosCompletedSchema,
   todoIdParamSchema,
   todoSchema,
   todoSearchQuerySchema,
@@ -161,6 +164,43 @@ describe("patchTodoSchema", () => {
   });
 });
 
+describe("setAllTodosCompletedSchema", () => {
+  it("accepts completed: true", () => {
+    expect(setAllTodosCompletedSchema.safeParse({ completed: true }).success).toBe(true);
+  });
+
+  it("accepts completed: false", () => {
+    expect(setAllTodosCompletedSchema.safeParse({ completed: false }).success).toBe(true);
+  });
+
+  it("rejects an empty object", () => {
+    expect(setAllTodosCompletedSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("rejects a completed value that isn't a boolean", () => {
+    expect(setAllTodosCompletedSchema.safeParse({ completed: "true" }).success).toBe(false);
+  });
+
+  it("strips an extra field but still accepts the body", () => {
+    const result = setAllTodosCompletedSchema.safeParse({ completed: true, notes: "x" });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({ completed: true });
+    }
+  });
+});
+
+describe("setAllTodosCompletedResponseSchema", () => {
+  it("accepts updatedCount: 0", () => {
+    expect(setAllTodosCompletedResponseSchema.safeParse({ updatedCount: 0 }).success).toBe(true);
+  });
+
+  it("rejects a negative updatedCount", () => {
+    expect(setAllTodosCompletedResponseSchema.safeParse({ updatedCount: -1 }).success).toBe(false);
+  });
+});
+
 describe("todoIdParamSchema", () => {
   it("accepts a well-formed uuid", () => {
     expect(todoIdParamSchema.safeParse("5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a").success).toBe(true);
@@ -199,5 +239,19 @@ describe("notFoundErrorResponseSchema", () => {
     if (result.success) {
       expect(result.data.error).toEqual({ type: "not_found" });
     }
+  });
+});
+
+describe("clearCompletedTodosResponseSchema", () => {
+  it.each([0, 7])("accepts a deletedCount of %i", (deletedCount) => {
+    expect(clearCompletedTodosResponseSchema.safeParse({ deletedCount }).success).toBe(true);
+  });
+
+  it.each([-1, 1.5])("rejects a deletedCount of %s", (deletedCount) => {
+    expect(clearCompletedTodosResponseSchema.safeParse({ deletedCount }).success).toBe(false);
+  });
+
+  it("rejects a body with no deletedCount", () => {
+    expect(clearCompletedTodosResponseSchema.safeParse({}).success).toBe(false);
   });
 });

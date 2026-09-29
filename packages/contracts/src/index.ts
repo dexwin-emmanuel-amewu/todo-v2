@@ -26,6 +26,22 @@ export const patchTodoSchema = todoSchema
 
 export type PatchTodoInput = z.infer<typeof patchTodoSchema>;
 
+export const setAllTodosCompletedSchema = z.object({ completed: z.boolean() });
+
+export type SetAllTodosCompletedInput = z.infer<typeof setAllTodosCompletedSchema>;
+
+export const setAllTodosCompletedResponseSchema = z.object({
+  updatedCount: z.number().int().min(0),
+});
+
+export type SetAllTodosCompletedResponse = z.infer<typeof setAllTodosCompletedResponseSchema>;
+
+export const clearCompletedTodosResponseSchema = z.object({
+  deletedCount: z.number().int().min(0),
+});
+
+export type ClearCompletedTodosResponse = z.infer<typeof clearCompletedTodosResponseSchema>;
+
 export const todoIdParamSchema = z.uuid();
 
 export type TodoIdParam = z.infer<typeof todoIdParamSchema>;
