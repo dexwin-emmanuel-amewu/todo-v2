@@ -1,6 +1,7 @@
-import { db } from "./../db/client.js";
+import { db } from "../db/client.js";
 import { buildApp } from "./../module/app.js";
 import { env } from "./../module/config.js";
+import { db } from "../db/client.js";
 
 const app = buildApp(db);
 

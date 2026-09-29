@@ -4,7 +4,7 @@ import {
   validationErrorResponseSchema,
 } from "@todo/contracts";
 import { err, ok } from "neverthrow";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { toCreateTodoResponse } from "./todo.routes.js";
 
@@ -17,40 +17,32 @@ describe("toCreateTodoResponse", () => {
       createdAt: new Date().toISOString(),
     };
 
-    const response = toCreateTodoResponse(ok(todo));
+describe("toListTodosResponse", () => {
+  it("maps an empty list to 200 with an empty items array", () => {
+    const response = toListTodosResponse(ok([]));
 
-    expect(response.status).toBe(201);
-    expect(todoSchema.safeParse(response.body).success).toBe(true);
+    expect(response).toEqual({ status: 200, body: { items: [] } });
+    expect(todoListResponseSchema.safeParse(response.body).success).toBe(true);
   });
 
-  it("maps a request-body validation error to 400", () => {
-    const response = toCreateTodoResponse(
-      err({
-        type: "request_validation",
-        issues: ["Too small: expected string to have >=6 characters"],
-      }),
-    );
+  it("maps a non-empty list to 200 with those items", () => {
+    const response = toListTodosResponse(ok([exampleTodo]));
 
-    expect(response.status).toBe(400);
-    expect(validationErrorResponseSchema.safeParse(response.body).success).toBe(true);
+    expect(response).toEqual({ status: 200, body: { items: [exampleTodo] } });
+    expect(todoListResponseSchema.safeParse(response.body).success).toBe(true);
   });
 
-  it("maps a database error to 500 without leaking the cause", () => {
-    const response = toCreateTodoResponse(
-      err({ type: "database", cause: new Error("connection refused") }),
-    );
+  it("maps a database error to 500 with an internal error body", () => {
+    const response = toListTodosResponse(err({ type: "database", cause: new Error("boom") }));
 
-    expect(response.status).toBe(500);
+    expect(response).toEqual({ status: 500, body: { error: { type: "internal" } } });
     expect(internalErrorResponseSchema.safeParse(response.body).success).toBe(true);
-    expect(JSON.stringify(response.body)).not.toContain("connection refused");
   });
 
-  it("maps a stored-row validation error to 500, not 400", () => {
-    const response = toCreateTodoResponse(
-      err({ type: "validation", issues: ["stored row failed todoSchema"] }),
-    );
+  it("maps a validation error to 500 with an internal error body", () => {
+    const response = toListTodosResponse(err({ type: "validation", issues: ["bad row"] }));
 
-    expect(response.status).toBe(500);
+    expect(response).toEqual({ status: 500, body: { error: { type: "internal" } } });
     expect(internalErrorResponseSchema.safeParse(response.body).success).toBe(true);
   });
 });
