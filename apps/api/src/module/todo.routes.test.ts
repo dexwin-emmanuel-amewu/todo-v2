@@ -18,7 +18,13 @@ import {
 } from "../db/test-db";
 import { buildApp } from "./app.js";
 import { createTodo } from "./todo.repository.js";
-import { parseStatusFilter, toCreateTodoResponse, toListTodosResponse } from "./todo.routes.js";
+import {
+  parsePagination,
+  parseSearchQuery,
+  parseStatusFilter,
+  toCreateTodoResponse,
+  toListTodosResponse,
+} from "./todo.routes.js";
 
 const exampleTodo: Todo = {
   id: "5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a",
@@ -67,17 +73,19 @@ describe("toListTodosResponse", () => {
 });
 
 describe("toListTodosResponse", () => {
-  it("maps an empty list to 200 with an empty items array", () => {
-    const response = toListTodosResponse(ok([]));
+  it("maps an empty page to 200 with pagination metadata", () => {
+    const body = { items: [], page: 1, pageSize: 20, totalItems: 0, totalPages: 0 };
+    const response = toListTodosResponse(ok(body));
 
-    expect(response).toEqual({ status: 200, body: { items: [] } });
+    expect(response).toEqual({ status: 200, body });
     expect(todoListResponseSchema.safeParse(response.body).success).toBe(true);
   });
 
-  it("maps a non-empty list to 200 with those items", () => {
-    const response = toListTodosResponse(ok([exampleTodo]));
+  it("maps a non-empty page to 200 with those items and metadata", () => {
+    const body = { items: [exampleTodo], page: 1, pageSize: 20, totalItems: 1, totalPages: 1 };
+    const response = toListTodosResponse(ok(body));
 
-    expect(response).toEqual({ status: 200, body: { items: [exampleTodo] } });
+    expect(response).toEqual({ status: 200, body });
     expect(todoListResponseSchema.safeParse(response.body).success).toBe(true);
   });
 
@@ -125,6 +133,97 @@ describe("parseStatusFilter", () => {
   });
 });
 
+describe("parseSearchQuery", () => {
+  it("returns undefined when search is omitted", () => {
+    const result = parseSearchQuery(undefined);
+
+    expect(result).toEqual(ok(undefined));
+  });
+
+  it("treats a blank string as undefined", () => {
+    const result = parseSearchQuery("");
+
+    expect(result).toEqual(ok(undefined));
+  });
+
+  it("treats a whitespace-only string as undefined", () => {
+    const result = parseSearchQuery("   ");
+
+    expect(result).toEqual(ok(undefined));
+  });
+
+  it("trims a search term with leading and trailing whitespace", () => {
+    const result = parseSearchQuery("  milestone  ");
+
+    expect(result).toEqual(ok("milestone"));
+  });
+
+  it("rejects a term over the length limit", () => {
+    const result = parseSearchQuery("a".repeat(101));
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.type).toBe("request_validation");
+    }
+  });
+
+  it("accepts a term at the length limit", () => {
+    const result = parseSearchQuery("a".repeat(100));
+
+    expect(result).toEqual(ok("a".repeat(100)));
+  });
+
+  it("rejects a duplicate query param, which Fastify parses as an array", () => {
+    const result = parseSearchQuery(["active", "completed"]);
+
+    expect(result.isErr()).toBe(true);
+  });
+});
+
+describe("parsePagination", () => {
+  it("defaults to page 1 and pageSize 20 when both are omitted", () => {
+    const result = parsePagination(undefined, undefined);
+
+    expect(result).toEqual(ok({ page: 1, pageSize: 20 }));
+  });
+
+  it("accepts explicit page and pageSize values", () => {
+    const result = parsePagination("2", "5");
+
+    expect(result).toEqual(ok({ page: 2, pageSize: 5 }));
+  });
+
+  it.each(["0", "-1", "1.5", "abc"])("rejects an invalid page value %s", (value) => {
+    const result = parsePagination(value, undefined);
+
+    expect(result.isErr()).toBe(true);
+  });
+
+  it.each(["0", "-1", "1.5", "abc", "101"])("rejects an invalid pageSize value %s", (value) => {
+    const result = parsePagination(undefined, value);
+
+    expect(result.isErr()).toBe(true);
+  });
+
+  it("accepts a pageSize at the cap", () => {
+    const result = parsePagination(undefined, "100");
+
+    expect(result).toEqual(ok({ page: 1, pageSize: 100 }));
+  });
+
+  it("rejects a duplicate page query param, which Fastify parses as an array", () => {
+    const result = parsePagination(["1", "2"], undefined);
+
+    expect(result.isErr()).toBe(true);
+  });
+
+  it("rejects a duplicate pageSize query param, which Fastify parses as an array", () => {
+    const result = parsePagination(undefined, ["10", "20"]);
+
+    expect(result.isErr()).toBe(true);
+  });
+});
+
 describe("GET /todos", () => {
   let database: DisposableDatabase;
 
@@ -137,12 +236,18 @@ describe("GET /todos", () => {
     await dropDisposableDatabase(database);
   }, 20_000);
 
-  it("returns 200 and an empty items array when no todos exist", async () => {
+  it("returns 200 and an empty items array with default pagination when no todos exist", async () => {
     const app = buildApp(database.db);
     const response = await app.inject({ method: "GET", url: "/todos" });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ items: [] });
+    expect(response.json()).toEqual({
+      items: [],
+      page: 1,
+      pageSize: 20,
+      totalItems: 0,
+      totalPages: 0,
+    });
   });
 
   it("returns 200 with created todos, ordered by createdAt ascending", async () => {
@@ -241,5 +346,196 @@ describe("GET /todos?status=", () => {
 
     expect(response.statusCode).toBe(400);
     expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+  });
+});
+
+describe("GET /todos?search=", () => {
+  let database: DisposableDatabase;
+  let matchingId: string;
+  let nonMatchingId: string;
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+
+    const matching = await createTodo(database.db, { title: "Write the milestone plan" });
+    const nonMatching = await createTodo(database.db, { title: "Buy groceries" });
+    if (matching.isErr() || nonMatching.isErr()) throw new Error("setup failed");
+
+    matchingId = matching.value.id;
+    nonMatchingId = nonMatching.value.id;
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("returns only todos whose title matches the search term", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?search=milestone" });
+
+    expect(response.statusCode).toBe(200);
+    const ids = response.json().items.map((todo: Todo) => todo.id);
+    expect(ids).toContain(matchingId);
+    expect(ids).not.toContain(nonMatchingId);
+  });
+
+  it("matches case-insensitively", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?search=MILESTONE" });
+
+    expect(response.statusCode).toBe(200);
+    const ids = response.json().items.map((todo: Todo) => todo.id);
+    expect(ids).toContain(matchingId);
+  });
+
+  it("returns the full unfiltered list when search is blank, same as omitted", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?search=" });
+
+    expect(response.statusCode).toBe(200);
+    const ids = response.json().items.map((todo: Todo) => todo.id);
+    expect(ids).toEqual(expect.arrayContaining([matchingId, nonMatchingId]));
+  });
+
+  it("returns 400 for a search term over the length limit", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({
+      method: "GET",
+      url: `/todos?search=${"a".repeat(101)}`,
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+  });
+
+  it("returns 400 for a duplicate search query param", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({
+      method: "GET",
+      url: "/todos?search=a&search=b",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+  });
+
+  it("combines status and search with AND", async () => {
+    const app = buildApp(database.db);
+    await database.db.update(todos).set({ completed: true }).where(eq(todos.id, matchingId));
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/todos?status=active&search=milestone",
+    });
+
+    expect(response.statusCode).toBe(200);
+    const ids = response.json().items.map((todo: Todo) => todo.id);
+    expect(ids).not.toContain(matchingId);
+  });
+});
+
+describe("GET /todos?page=&pageSize=", () => {
+  let database: DisposableDatabase;
+  let ids: string[];
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+
+    ids = [];
+    for (let index = 0; index < 5; index += 1) {
+      const created = await createTodo(database.db, { title: `Paginated todo ${index}` });
+      if (created.isErr()) throw new Error("setup failed");
+      ids.push(created.value.id);
+    }
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  it("uses defaults of page 1 and pageSize 20 when omitted", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.page).toBe(1);
+    expect(body.pageSize).toBe(20);
+    expect(body.totalItems).toBe(5);
+    expect(body.totalPages).toBe(1);
+    expect(body.items.map((todo: Todo) => todo.id)).toEqual(ids);
+  });
+
+  it("returns the requested page and pageSize slice", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?page=2&pageSize=2" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.page).toBe(2);
+    expect(body.pageSize).toBe(2);
+    expect(body.totalItems).toBe(5);
+    expect(body.totalPages).toBe(3);
+    expect(body.items.map((todo: Todo) => todo.id)).toEqual(ids.slice(2, 4));
+  });
+
+  it("returns an empty items array for a page beyond the last page", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?page=999" });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.items).toEqual([]);
+    expect(body.totalItems).toBe(5);
+    expect(body.totalPages).toBe(1);
+  });
+
+  it.each(["0", "-1", "1.5", "abc"])("returns 400 for an invalid page value %s", async (value) => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: `/todos?page=${value}` });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+  });
+
+  it("returns 400 for a pageSize over the cap", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?pageSize=101" });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+  });
+
+  it("returns 400 for a duplicate page query param", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?page=1&page=2" });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+  });
+
+  it("returns 400 for a duplicate pageSize query param", async () => {
+    const app = buildApp(database.db);
+    const response = await app.inject({ method: "GET", url: "/todos?pageSize=5&pageSize=10" });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+  });
+
+  it("combines status, search, and pagination together", async () => {
+    const app = buildApp(database.db);
+    await database.db.update(todos).set({ completed: true }).where(eq(todos.id, ids[0]!));
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/todos?status=active&search=paginated&page=1&pageSize=2",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body.totalItems).toBe(4);
+    expect(body.items.map((todo: Todo) => todo.id)).toEqual(ids.slice(1, 3));
   });
 });

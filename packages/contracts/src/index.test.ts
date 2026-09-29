@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { todoSchema, todoStatusFilterSchema } from "./index";
+import { todoSchema, todoSearchQuerySchema, todoStatusFilterSchema } from "./index";
 
 describe("todoSchema", () => {
   it("parses a valid todo", () => {
@@ -25,5 +25,28 @@ describe("todoStatusFilterSchema", () => {
 
   it("rejects an array, the shape a duplicate query param takes", () => {
     expect(todoStatusFilterSchema.safeParse(["active", "completed"]).success).toBe(false);
+  });
+});
+
+describe("todoSearchQuerySchema", () => {
+  it("accepts a term at the length limit", () => {
+    expect(todoSearchQuerySchema.safeParse("a".repeat(100)).success).toBe(true);
+  });
+
+  it("rejects a term one character over the length limit", () => {
+    expect(todoSearchQuerySchema.safeParse("a".repeat(101)).success).toBe(false);
+  });
+
+  it("trims leading and trailing whitespace", () => {
+    const result = todoSearchQuerySchema.safeParse("  milestone  ");
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toBe("milestone");
+    }
+  });
+
+  it("rejects an array, the shape a duplicate query param takes", () => {
+    expect(todoSearchQuerySchema.safeParse(["a", "b"]).success).toBe(false);
   });
 });
