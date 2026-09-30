@@ -36,6 +36,12 @@ export const setAllTodosCompletedResponseSchema = z.object({
 
 export type SetAllTodosCompletedResponse = z.infer<typeof setAllTodosCompletedResponseSchema>;
 
+export const clearCompletedTodosResponseSchema = z.object({
+  deletedCount: z.number().int().min(0),
+});
+
+export type ClearCompletedTodosResponse = z.infer<typeof clearCompletedTodosResponseSchema>;
+
 export const todoIdParamSchema = z.uuid();
 
 export type TodoIdParam = z.infer<typeof todoIdParamSchema>;
