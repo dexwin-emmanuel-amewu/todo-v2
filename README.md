@@ -26,6 +26,8 @@ Paginate with `?page=<n>&pageSize=<n>`. `page` defaults to 1, `pageSize` default
 
 pnpm --filter web dev (Runs on `http://localhost:5173`.)
 
+The home page lists every todo from `GET /todos`, oldest first, showing each title and an Active or Completed badge. It is read-only for now: there is no add, toggle, edit, or delete, and no filter, search, or pagination control.
+
 Stop Postgres when you're done:
 pnpm docker:down
 

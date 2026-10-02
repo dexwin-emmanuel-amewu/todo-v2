@@ -96,12 +96,18 @@ importers:
       '@tanstack/react-router':
         specifier: ^1.170.30
         version: 1.170.30(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@todo/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       react:
         specifier: ^19.2.8
         version: 19.2.8
       react-dom:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
+      ts-pattern:
+        specifier: ^5.9.0
+        version: 5.9.0
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.3
