@@ -130,4 +130,31 @@ describe("HomePage", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.queryByText(/no todos yet/i)).not.toBeInTheDocument();
   });
+
+  it("creates a todo and refreshes the list", async () => {
+    const created = {
+      id: "7f3e5d4c-8d3c-4d9c-9d3c-8d3c4d9c8d3c",
+      title: "Read a book",
+      completed: false,
+      createdAt: "2026-09-30T12:00:00.000Z",
+    };
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+      .mockResolvedValueOnce(jsonResponse(created, 201))
+      .mockResolvedValueOnce(jsonResponse(listBody([...todos, created])));
+
+    renderPage();
+    await screen.findByText("Buy oat milk");
+    const input = screen.getByRole("textbox", { name: "Todo title" });
+    await userEvent.type(input, "Read a book");
+    await userEvent.click(screen.getByRole("button", { name: "Add todo" }));
+
+    expect(await screen.findByText("Todo added.")).toBeInTheDocument();
+    expect(await screen.findByText("Read a book")).toBeInTheDocument();
+    expect(input).toHaveValue("");
+    expect(input).toHaveFocus();
+    expect(mockFetch()).toHaveBeenCalledTimes(3);
+    expect(mockFetch().mock.calls[1][1].method).toBe("POST");
+    expect(mockFetch().mock.calls[2][1].method).toBe("GET");
+  });
 });

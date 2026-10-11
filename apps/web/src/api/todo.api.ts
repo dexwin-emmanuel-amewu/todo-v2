@@ -1,4 +1,10 @@
-import { type TodoListResponse, todoListResponseSchema } from "@todo/contracts";
+import {
+  type Todo,
+  type TodoListResponse,
+  createTodoSchema,
+  todoListResponseSchema,
+  todoSchema,
+} from "@todo/contracts";
 
 export const TODO_API_BASE_URL = import.meta.env.VITE_API_URL ?? "";
 
@@ -51,6 +57,46 @@ export async function fetchTodoList(): Promise<TodoListResponse> {
   }
 
   const parsed = todoListResponseSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new TodoApiError("response_validation", "The API response did not match the contract.", {
+      issues: parsed.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  return parsed.data;
+}
+
+export async function createTodo(title: string): Promise<Todo> {
+  let response: Response;
+
+  try {
+    response = await fetch(`${TODO_API_BASE_URL}/todos`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(createTodoSchema.parse({ title })),
+    });
+  } catch (cause) {
+    throw new TodoApiError("network", "Could not reach the API.", { cause });
+  }
+
+  if (!response.ok) {
+    throw new TodoApiError("http", `The API responded with ${response.status}.`, {
+      status: response.status,
+    });
+  }
+
+  let body: unknown;
+
+  try {
+    body = await response.json();
+  } catch (cause) {
+    throw new TodoApiError("response_validation", "The API response was not valid JSON.", {
+      cause,
+    });
+  }
+
+  const parsed = todoSchema.safeParse(body);
 
   if (!parsed.success) {
     throw new TodoApiError("response_validation", "The API response did not match the contract.", {

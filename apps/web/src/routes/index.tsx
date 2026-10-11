@@ -1,4 +1,5 @@
 import { TodoList } from "../components/TodoList";
+import { CreateTodoForm } from "../components/CreateTodoForm";
 import { useTodoListQuery } from "../hooks/useTodoListQuery";
 import { getTodoListViewState } from "../module/todo.state";
 
@@ -16,6 +17,7 @@ export function HomePage() {
   return (
     <main className="mx-auto max-w-md p-8">
       <h1 className="mb-4 text-2xl font-semibold">Todo</h1>
+      <CreateTodoForm />
       <TodoList state={state} />
     </main>
   );
