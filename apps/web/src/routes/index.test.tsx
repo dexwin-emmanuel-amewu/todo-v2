@@ -157,4 +157,55 @@ describe("HomePage", () => {
     expect(mockFetch().mock.calls[1][1].method).toBe("POST");
     expect(mockFetch().mock.calls[2][1].method).toBe("GET");
   });
+
+  it("patches one todo and refreshes the server-confirmed completion state", async () => {
+    const completedTodo = { ...todos[0], completed: true };
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+      .mockResolvedValueOnce(jsonResponse(completedTodo))
+      .mockResolvedValueOnce(jsonResponse(listBody([completedTodo, todos[1]])));
+
+    renderPage();
+    await screen.findByText("Buy oat milk");
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" }));
+
+    expect(
+      await screen.findByRole("checkbox", { name: "Mark Buy oat milk as active" }),
+    ).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Mark Water the plants as active" })).toBeChecked();
+    expect(mockFetch()).toHaveBeenCalledTimes(3);
+    expect(mockFetch().mock.calls[1][0]).toBe(`/todos/${todos[0].id}`);
+    expect(mockFetch().mock.calls[1][1]).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ completed: true }),
+    });
+    expect(mockFetch().mock.calls[2][1].method).toBe("GET");
+  });
+
+  it("keeps the checkbox unchanged after a failed update and allows retry", async () => {
+    const completedTodo = { ...todos[0], completed: true };
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+      .mockRejectedValueOnce(new TypeError("offline"))
+      .mockResolvedValueOnce(jsonResponse(completedTodo))
+      .mockResolvedValueOnce(jsonResponse(listBody([completedTodo, todos[1]])));
+
+    renderPage();
+    await screen.findByText("Buy oat milk");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not reach the server/i);
+    expect(
+      screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" }),
+    ).not.toBeChecked();
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry update" }));
+
+    expect(
+      await screen.findByRole("checkbox", { name: "Mark Buy oat milk as active" }),
+    ).toBeChecked();
+    expect(mockFetch()).toHaveBeenCalledTimes(4);
+    expect(mockFetch().mock.calls[2][1].body).toBe(JSON.stringify({ completed: true }));
+  });
 });
