@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createTodo, fetchTodoList, TODO_API_BASE_URL, TodoApiError } from "./todo.api";
+import {
+  createTodo,
+  fetchTodoList,
+  patchTodoCompletion,
+  TODO_API_BASE_URL,
+  TodoApiError,
+} from "./todo.api";
 
 const todo = {
   id: "5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a",
@@ -144,6 +150,46 @@ describe("createTodo", () => {
 
     globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({ title: "bad" }, 201));
     await expect(createTodo("Buy oat milk")).rejects.toMatchObject({
+      type: "response_validation",
+    });
+  });
+});
+
+describe("patchTodoCompletion", () => {
+  it("patches the completion value and parses the updated todo", async () => {
+    const completedTodo = { ...todo, completed: true };
+    mockFetch().mockResolvedValue(jsonResponse(completedTodo));
+
+    await expect(patchTodoCompletion(todo.id, true)).resolves.toEqual(completedTodo);
+    expect(mockFetch()).toHaveBeenCalledWith(`${TODO_API_BASE_URL}/todos/${todo.id}`, {
+      method: "PATCH",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ completed: true }),
+    });
+  });
+
+  it("rejects invalid ids or bodies without making a request", async () => {
+    await expect(patchTodoCompletion("not-a-uuid", true)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    await expect(patchTodoCompletion(todo.id, "true" as unknown as boolean)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    expect(mockFetch()).not.toHaveBeenCalled();
+  });
+
+  it("wraps network, HTTP, and invalid response failures", async () => {
+    mockFetch().mockRejectedValueOnce(new TypeError("offline"));
+    await expect(patchTodoCompletion(todo.id, true)).rejects.toMatchObject({ type: "network" });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({}, 404));
+    await expect(patchTodoCompletion(todo.id, true)).rejects.toMatchObject({
+      type: "http",
+      status: 404,
+    });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({ id: todo.id }));
+    await expect(patchTodoCompletion(todo.id, true)).rejects.toMatchObject({
       type: "response_validation",
     });
   });
