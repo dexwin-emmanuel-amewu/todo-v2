@@ -134,6 +134,93 @@ describe("TodoList", () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
+  it("enters edit mode on double-click with the current title selected", async () => {
+    render(<TodoList state={{ state: "ready", items }} />);
+
+    await userEvent.dblClick(screen.getByText("Buy oat milk"));
+
+    const input = screen.getByRole("textbox", { name: "Edit title for Buy oat milk" });
+    expect(input).toHaveValue("Buy oat milk");
+    expect(input).toHaveFocus();
+    expect(input).toHaveProperty("selectionStart", 0);
+    expect(input).toHaveProperty("selectionEnd", "Buy oat milk".length);
+  });
+
+  it("lets keyboard users enter edit mode and save the full PUT representation with Enter", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TodoList state={{ state: "ready", items }} replacement={{ isPending: false, onSave }} />,
+    );
+
+    const editButton = screen.getByRole("button", { name: "Edit Buy oat milk" });
+    editButton.focus();
+    await userEvent.keyboard("{Enter}");
+    const input = screen.getByRole("textbox", { name: "Edit title for Buy oat milk" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "Buy oat milk tomorrow");
+    await userEvent.keyboard("{Enter}");
+
+    expect(onSave).toHaveBeenCalledWith(items[0].id, "Buy oat milk tomorrow", false);
+    expect(await screen.findByRole("button", { name: "Edit Buy oat milk" })).toHaveFocus();
+  });
+
+  it("cancels with Escape, restores the original title, and makes no request", async () => {
+    const onSave = vi.fn();
+    render(
+      <TodoList state={{ state: "ready", items }} replacement={{ isPending: false, onSave }} />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit Buy oat milk" }));
+    const input = screen.getByRole("textbox", { name: "Edit title for Buy oat milk" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "Changed title");
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.getByText("Buy oat milk")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit Buy oat milk" })).toHaveFocus();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("shows validation feedback and makes no request for an invalid title", async () => {
+    const onSave = vi.fn();
+    render(
+      <TodoList state={{ state: "ready", items }} replacement={{ isPending: false, onSave }} />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit Buy oat milk" }));
+    const input = screen.getByRole("textbox", { name: "Edit title for Buy oat milk" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "abc");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByText("Use at least 6 characters.")).toBeInTheDocument();
+    expect(input).toHaveFocus();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("keeps the draft after failure and retries the same title and completion value", async () => {
+    const onSave = vi.fn().mockRejectedValueOnce(new Error("temporary failure"));
+    onSave.mockResolvedValueOnce(undefined);
+    render(
+      <TodoList state={{ state: "ready", items }} replacement={{ isPending: false, onSave }} />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit Buy oat milk" }));
+    const input = screen.getByRole("textbox", { name: "Edit title for Buy oat milk" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "Buy oat milk tomorrow");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/draft is still here/i);
+    expect(input).toHaveValue("Buy oat milk tomorrow");
+    expect(input).toHaveFocus();
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry save" }));
+    expect(onSave).toHaveBeenNthCalledWith(1, items[0].id, "Buy oat milk tomorrow", false);
+    expect(onSave).toHaveBeenNthCalledWith(2, items[0].id, "Buy oat milk tomorrow", false);
+    expect(await screen.findByRole("button", { name: "Edit Buy oat milk" })).toHaveFocus();
+  });
+
   it("shows the empty message and no list when there are no todos", () => {
     render(<TodoList state={{ state: "ready", items: [] }} />);
 

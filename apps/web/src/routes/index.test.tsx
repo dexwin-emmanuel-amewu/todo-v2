@@ -208,4 +208,33 @@ describe("HomePage", () => {
     expect(mockFetch()).toHaveBeenCalledTimes(4);
     expect(mockFetch().mock.calls[2][1].body).toBe(JSON.stringify({ completed: true }));
   });
+
+  it("replaces a title with PUT and preserves the todo completion value", async () => {
+    const updatedTodo = { ...todos[1], title: "Water the plants indoors" };
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+      .mockResolvedValueOnce(jsonResponse(updatedTodo))
+      .mockResolvedValueOnce(jsonResponse(listBody([todos[0], updatedTodo])));
+
+    renderPage();
+    await screen.findByText("Water the plants");
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit Water the plants" }));
+    const input = screen.getByRole("textbox", { name: "Edit title for Water the plants" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "Water the plants indoors");
+    await userEvent.keyboard("{Enter}");
+
+    expect(await screen.findByText("Water the plants indoors")).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "Mark Water the plants indoors as active" }),
+    ).toBeChecked();
+    expect(mockFetch()).toHaveBeenCalledTimes(3);
+    expect(mockFetch().mock.calls[1][0]).toBe(`/todos/${todos[1].id}`);
+    expect(mockFetch().mock.calls[1][1]).toMatchObject({
+      method: "PUT",
+      body: JSON.stringify({ title: "Water the plants indoors", completed: true }),
+    });
+    expect(mockFetch().mock.calls[2][1].method).toBe("GET");
+  });
 });
