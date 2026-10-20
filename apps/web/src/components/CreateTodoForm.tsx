@@ -53,6 +53,7 @@ export function CreateTodoForm() {
               () => "Could not reach the server. Check your connection and try again.",
             )
             .with("http", () => "The server could not add this todo. Try again.")
+            .with("request_validation", () => "Enter a valid todo title.")
             .with(
               "response_validation",
               () => "The server returned an unexpected response. Try again.",

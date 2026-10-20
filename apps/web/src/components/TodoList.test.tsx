@@ -61,6 +61,79 @@ describe("TodoList", () => {
     expect(listItems[1]).toHaveTextContent(/completed/i);
   });
 
+  it("shows a checked state and action label for each todo", () => {
+    render(<TodoList state={{ state: "ready", items }} />);
+
+    expect(
+      screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" }),
+    ).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Mark Water the plants as active" })).toBeChecked();
+  });
+
+  it("calls the completion handler with the requested state", async () => {
+    const onToggle = vi.fn();
+    render(
+      <TodoList
+        state={{ state: "ready", items }}
+        completion={{
+          isPending: false,
+          error: null,
+          onToggle,
+          onRetry: vi.fn(),
+        }}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" }));
+
+    expect(onToggle).toHaveBeenCalledWith(items[0].id, true);
+  });
+
+  it("keeps the server state visible and disables controls while pending", () => {
+    render(
+      <TodoList
+        state={{ state: "ready", items }}
+        completion={{
+          isPending: true,
+          pendingTodoId: items[0].id,
+          error: null,
+          onToggle: vi.fn(),
+          onRetry: vi.fn(),
+        }}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" });
+    expect(checkbox).toBeDisabled();
+    expect(checkbox).not.toBeChecked();
+    expect(screen.getByRole("list")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getAllByText("Active")).toHaveLength(2);
+    expect(screen.getByRole("status")).toHaveTextContent("Updating…");
+  });
+
+  it("shows row failure feedback and retries the same mutation", async () => {
+    const onRetry = vi.fn();
+    render(
+      <TodoList
+        state={{ state: "ready", items }}
+        completion={{
+          isPending: false,
+          pendingTodoId: items[0].id,
+          error,
+          errorTodoId: items[0].id,
+          onToggle: vi.fn(),
+          onRetry,
+        }}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" });
+    expect(checkbox).not.toBeChecked();
+    expect(screen.getByRole("alert")).toHaveTextContent(/could not reach the server/i);
+    await userEvent.click(screen.getByRole("button", { name: "Retry update" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
   it("shows the empty message and no list when there are no todos", () => {
     render(<TodoList state={{ state: "ready", items: [] }} />);
 
