@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchTodoList, TODO_API_BASE_URL, TodoApiError } from "./todo.api";
+import { createTodo, fetchTodoList, TODO_API_BASE_URL, TodoApiError } from "./todo.api";
 
 const todo = {
   id: "5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a",
@@ -112,5 +112,39 @@ describe("fetchTodoList", () => {
     );
 
     await expect(fetchTodoList()).rejects.toMatchObject({ type: "response_validation" });
+  });
+});
+
+describe("createTodo", () => {
+  const todo = {
+    id: "5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a",
+    title: "Buy oat milk",
+    completed: false,
+    createdAt: "2026-09-30T10:00:00.000Z",
+  };
+
+  it("posts the title and parses the created todo", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(todo, 201));
+    globalThis.fetch = fetchMock;
+
+    await expect(createTodo(" Buy oat milk ")).resolves.toEqual(todo);
+    expect(fetchMock).toHaveBeenCalledWith(`${TODO_API_BASE_URL}/todos`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Buy oat milk" }),
+    });
+  });
+
+  it("wraps network, HTTP, and invalid response failures", async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("offline"));
+    await expect(createTodo("Buy oat milk")).rejects.toMatchObject({ type: "network" });
+
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({}, 500));
+    await expect(createTodo("Buy oat milk")).rejects.toMatchObject({ type: "http", status: 500 });
+
+    globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse({ title: "bad" }, 201));
+    await expect(createTodo("Buy oat milk")).rejects.toMatchObject({
+      type: "response_validation",
+    });
   });
 });
