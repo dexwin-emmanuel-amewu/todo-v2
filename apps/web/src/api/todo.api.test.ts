@@ -4,6 +4,7 @@ import {
   createTodo,
   fetchTodoList,
   patchTodoCompletion,
+  replaceTodo,
   TODO_API_BASE_URL,
   TodoApiError,
 } from "./todo.api";
@@ -190,6 +191,98 @@ describe("patchTodoCompletion", () => {
 
     mockFetch().mockResolvedValueOnce(jsonResponse({ id: todo.id }));
     await expect(patchTodoCompletion(todo.id, true)).rejects.toMatchObject({
+      type: "response_validation",
+    });
+  });
+});
+
+describe("replaceTodo", () => {
+  it("sends the complete replacement body and parses the updated todo", async () => {
+    const updatedTodo = { ...todo, title: "Buy oat milk tomorrow", completed: true };
+    mockFetch().mockResolvedValue(jsonResponse(updatedTodo));
+
+    await expect(replaceTodo(todo.id, " Buy oat milk tomorrow ", true)).resolves.toEqual(
+      updatedTodo,
+    );
+    expect(mockFetch()).toHaveBeenCalledWith(`${TODO_API_BASE_URL}/todos/${todo.id}`, {
+      method: "PUT",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Buy oat milk tomorrow", completed: true }),
+    });
+  });
+
+  it("rejects invalid ids and replacement data without calling fetch", async () => {
+    await expect(replaceTodo("bad-id", "Buy oat milk", false)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    await expect(replaceTodo(todo.id, "short", false)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    await expect(
+      replaceTodo(todo.id, "Buy oat milk", "false" as unknown as boolean),
+    ).rejects.toMatchObject({ type: "request_validation" });
+    expect(mockFetch()).not.toHaveBeenCalled();
+  });
+
+  it("maps network, HTTP, and invalid response failures", async () => {
+    mockFetch().mockRejectedValueOnce(new TypeError("offline"));
+    await expect(replaceTodo(todo.id, "Buy oat milk", false)).rejects.toMatchObject({
+      type: "network",
+    });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({}, 500));
+    await expect(replaceTodo(todo.id, "Buy oat milk", false)).rejects.toMatchObject({
+      type: "http",
+      status: 500,
+    });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({ id: todo.id }));
+    await expect(replaceTodo(todo.id, "Buy oat milk", false)).rejects.toMatchObject({
+      type: "response_validation",
+    });
+  });
+});
+
+describe("replaceTodo", () => {
+  it("puts the complete mutable representation and parses the updated todo", async () => {
+    const updatedTodo = { ...todo, title: "Buy oat milk", completed: true };
+    mockFetch().mockResolvedValue(jsonResponse(updatedTodo));
+
+    await expect(replaceTodo(todo.id, "  Buy oat milk  ", true)).resolves.toEqual(updatedTodo);
+    expect(mockFetch()).toHaveBeenCalledWith(`${TODO_API_BASE_URL}/todos/${todo.id}`, {
+      method: "PUT",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Buy oat milk", completed: true }),
+    });
+  });
+
+  it("rejects invalid ids or replacement bodies without making a request", async () => {
+    await expect(replaceTodo("not-a-uuid", "Buy oat milk", false)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    await expect(replaceTodo(todo.id, "abc", false)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    await expect(
+      replaceTodo(todo.id, "Buy oat milk", "false" as unknown as boolean),
+    ).rejects.toMatchObject({ type: "request_validation" });
+    expect(mockFetch()).not.toHaveBeenCalled();
+  });
+
+  it("wraps network, HTTP, and invalid response failures", async () => {
+    mockFetch().mockRejectedValueOnce(new TypeError("offline"));
+    await expect(replaceTodo(todo.id, "Buy oat milk", false)).rejects.toMatchObject({
+      type: "network",
+    });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({}, 500));
+    await expect(replaceTodo(todo.id, "Buy oat milk", false)).rejects.toMatchObject({
+      type: "http",
+      status: 500,
+    });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({ id: todo.id }));
+    await expect(replaceTodo(todo.id, "Buy oat milk", false)).rejects.toMatchObject({
       type: "response_validation",
     });
   });
