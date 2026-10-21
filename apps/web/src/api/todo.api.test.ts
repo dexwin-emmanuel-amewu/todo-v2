@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createTodo,
+  deleteTodo,
   fetchTodoList,
   patchTodoCompletion,
   replaceTodo,
@@ -285,5 +286,37 @@ describe("replaceTodo", () => {
     await expect(replaceTodo(todo.id, "Buy oat milk", false)).rejects.toMatchObject({
       type: "response_validation",
     });
+  });
+});
+
+describe("deleteTodo", () => {
+  it("sends a bodyless DELETE and resolves on 204 without reading the body", async () => {
+    const response = new Response(null, { status: 204 });
+    const json = vi.spyOn(response, "json");
+    mockFetch().mockResolvedValue(response);
+
+    await expect(deleteTodo(todo.id)).resolves.toBeUndefined();
+    expect(mockFetch()).toHaveBeenCalledTimes(1);
+    expect(mockFetch()).toHaveBeenCalledWith(`${TODO_API_BASE_URL}/todos/${todo.id}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+    expect(json).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malformed id without making a request", async () => {
+    await expect(deleteTodo("not-a-uuid")).rejects.toMatchObject({ type: "request_validation" });
+    expect(mockFetch()).not.toHaveBeenCalled();
+  });
+
+  it("wraps network and HTTP failures, including 404 and 500", async () => {
+    mockFetch().mockRejectedValueOnce(new TypeError("offline"));
+    await expect(deleteTodo(todo.id)).rejects.toMatchObject({ type: "network" });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({}, 404));
+    await expect(deleteTodo(todo.id)).rejects.toMatchObject({ type: "http", status: 404 });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({}, 500));
+    await expect(deleteTodo(todo.id)).rejects.toMatchObject({ type: "http", status: 500 });
   });
 });
