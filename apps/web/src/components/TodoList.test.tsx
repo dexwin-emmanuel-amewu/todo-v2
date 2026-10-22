@@ -274,6 +274,43 @@ describe("TodoList", () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
+  it("re-enables the other rows when the row being edited disappears", async () => {
+    const { rerender } = render(<TodoList state={{ state: "ready", items }} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit Buy oat milk" }));
+    expect(screen.getByRole("button", { name: "Edit Water the plants" })).toBeDisabled();
+
+    rerender(<TodoList state={{ state: "ready", items: items.slice(1) }} />);
+
+    expect(screen.getByRole("button", { name: "Edit Water the plants" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete Water the plants" })).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: "Mark Water the plants as active" })).toBeEnabled();
+  });
+
+  it("keeps the draft being edited when the list refreshes in the background", async () => {
+    const { rerender } = render(<TodoList state={{ state: "ready", items }} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit Buy oat milk" }));
+    const input = screen.getByRole("textbox", { name: "Edit title for Buy oat milk" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "Buy almond milk");
+
+    rerender(<TodoList state={{ state: "refreshing", items }} />);
+    expect(screen.getByRole("textbox", { name: "Edit title for Buy oat milk" })).toHaveValue(
+      "Buy almond milk",
+    );
+
+    rerender(<TodoList state={{ state: "refresh_failure", items, error, retry: vi.fn() }} />);
+    expect(screen.getByRole("textbox", { name: "Edit title for Buy oat milk" })).toHaveValue(
+      "Buy almond milk",
+    );
+
+    rerender(<TodoList state={{ state: "ready", items }} />);
+    expect(screen.getByRole("textbox", { name: "Edit title for Buy oat milk" })).toHaveValue(
+      "Buy almond milk",
+    );
+  });
+
   describe("deletion", () => {
     const idle = { isPending: false, error: null };
 

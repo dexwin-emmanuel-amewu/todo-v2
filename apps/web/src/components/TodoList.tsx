@@ -502,6 +502,7 @@ export function TodoList({
     else deleteButtonRefs.current.delete(todoId);
   };
   const busy = completion.isPending || replacement.isPending || deletion.isPending;
+  const activeEditingId = items?.some((item) => item.id === editingTodoId) ? editingTodoId : null;
 
   async function onDelete(todo: Todo) {
     if (deletionInFlight.current || deletion.isPending || !items) return;
@@ -541,11 +542,11 @@ export function TodoList({
 
   useLayoutEffect(() => {
     const previousTodoId = previousEditingTodoId.current;
-    if (previousTodoId && editingTodoId === null) {
+    if (previousTodoId && activeEditingId === null) {
       editButtonRefs.current.get(previousTodoId)?.focus();
     }
-    previousEditingTodoId.current = editingTodoId;
-  }, [editingTodoId]);
+    previousEditingTodoId.current = activeEditingId;
+  }, [activeEditingId]);
 
   return match(state)
     .with({ state: "initial_loading" }, () => (
@@ -561,56 +562,26 @@ export function TodoList({
         <RetryButton retry={retry} />
       </div>
     ))
-    .with({ state: "ready" }, ({ items }) => (
-      <TodoItems
-        items={items}
-        busy={busy}
-        controls={completion}
-        replacement={replacement}
-        deletion={deletion}
-        editingTodoId={editingTodoId}
-        onStartEdit={onStartEdit}
-        onCancelEdit={onCancelEdit}
-        onDelete={onDelete}
-        registerEditButton={registerEditButton}
-        registerDeleteButton={registerDeleteButton}
-        emptyHeadingRef={emptyHeadingRef}
-      />
-    ))
-    .with({ state: "refreshing" }, ({ items }) => (
+    .with({ state: P.union("ready", "refreshing", "refresh_failure") }, (listState) => (
       <div className="space-y-3">
-        <p role="status" aria-live="polite" className="text-sm text-slate-500">
-          Refreshing
-        </p>
+        {listState.state === "refreshing" && (
+          <p role="status" aria-live="polite" className="text-sm text-slate-500">
+            Refreshing
+          </p>
+        )}
+        {listState.state === "refresh_failure" && (
+          <div role="alert" className={alertClassName}>
+            <p>Could not refresh your todos. Showing the last list that loaded.</p>
+            <RetryButton retry={listState.retry} />
+          </div>
+        )}
         <TodoItems
-          items={items}
-          busy={true}
+          items={listState.items}
+          busy={listState.state === "refreshing" || busy}
           controls={completion}
           replacement={replacement}
           deletion={deletion}
-          editingTodoId={editingTodoId}
-          onStartEdit={onStartEdit}
-          onCancelEdit={onCancelEdit}
-          onDelete={onDelete}
-          registerEditButton={registerEditButton}
-          registerDeleteButton={registerDeleteButton}
-          emptyHeadingRef={emptyHeadingRef}
-        />
-      </div>
-    ))
-    .with({ state: "refresh_failure" }, ({ items, retry }) => (
-      <div className="space-y-3">
-        <div role="alert" className={alertClassName}>
-          <p>Could not refresh your todos. Showing the last list that loaded.</p>
-          <RetryButton retry={retry} />
-        </div>
-        <TodoItems
-          items={items}
-          busy={busy}
-          controls={completion}
-          replacement={replacement}
-          deletion={deletion}
-          editingTodoId={editingTodoId}
+          editingTodoId={activeEditingId}
           onStartEdit={onStartEdit}
           onCancelEdit={onCancelEdit}
           onDelete={onDelete}
