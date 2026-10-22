@@ -1,6 +1,7 @@
 import { TodoList } from "../components/TodoList";
 import { CreateTodoForm } from "../components/CreateTodoForm";
 import { usePatchTodoCompletionMutation } from "../hooks/usePatchTodoCompletionMutation";
+import { useDeleteTodoMutation } from "../hooks/useDeleteTodoMutation";
 import { useReplaceTodoMutation } from "../hooks/useReplaceTodoMutation";
 import { useTodoListQuery } from "../hooks/useTodoListQuery";
 import { getTodoListViewState } from "../module/todo.state";
@@ -9,6 +10,7 @@ export function HomePage() {
   const query = useTodoListQuery();
   const completionMutation = usePatchTodoCompletionMutation();
   const replacementMutation = useReplaceTodoMutation();
+  const deletionMutation = useDeleteTodoMutation();
 
   const state = getTodoListViewState({
     status: query.status,
@@ -39,11 +41,24 @@ export function HomePage() {
       replacementMutation.mutateAsync({ todoId, title, completed }),
   };
 
+  const deletion = {
+    isPending: deletionMutation.isPending,
+    pendingTodoId: deletionMutation.variables,
+    error: deletionMutation.error,
+    errorTodoId: deletionMutation.variables,
+    onDelete: (todoId: string) => deletionMutation.mutateAsync(todoId),
+  };
+
   return (
     <main className="mx-auto max-w-md p-8">
       <h1 className="mb-4 text-2xl font-semibold">Todo</h1>
       <CreateTodoForm />
-      <TodoList state={state} completion={completion} replacement={replacement} />
+      <TodoList
+        state={state}
+        completion={completion}
+        replacement={replacement}
+        deletion={deletion}
+      />
     </main>
   );
 }
