@@ -52,12 +52,12 @@ test("each filter requests its server filter, updates the URL, and shows only it
   const requests = await mockApi(page);
   await page.goto("/");
 
-  await expect(page.getByText("2 todos")).toBeVisible();
+  await expect(page.getByText("Buy oat milk")).toBeVisible();
+  await expect(page.getByText("Water the plants")).toBeVisible();
   await expect(filterLink(page, "All")).toHaveAttribute("aria-current", "page");
 
   await filterLink(page, "Active").click();
   await expect(page).toHaveURL(/\/\?status=active$/);
-  await expect(page.getByText("1 active todo")).toBeVisible();
   await expect(page.getByText("Buy oat milk")).toBeVisible();
   await expect(page.getByText("Water the plants")).toHaveCount(0);
   await expect(filterLink(page, "Active")).toHaveAttribute("aria-current", "page");
@@ -65,7 +65,6 @@ test("each filter requests its server filter, updates the URL, and shows only it
 
   await filterLink(page, "Completed").click();
   await expect(page).toHaveURL(/\/\?status=completed$/);
-  await expect(page.getByText("1 completed todo")).toBeVisible();
   await expect(page.getByText("Water the plants")).toBeVisible();
   await expect(page.getByText("Buy oat milk")).toHaveCount(0);
   await expect(filterLink(page, "Completed")).toHaveAttribute("aria-current", "page");
@@ -76,14 +75,15 @@ test("each filter requests its server filter, updates the URL, and shows only it
 test("back and forward restore the filter", async ({ page }) => {
   await mockApi(page);
   await page.goto("/");
-  await expect(page.getByText("2 todos")).toBeVisible();
+  await expect(page.getByText("Buy oat milk")).toBeVisible();
 
   await filterLink(page, "Completed").click();
-  await expect(page.getByText("1 completed todo")).toBeVisible();
+  await expect(page.getByText("Buy oat milk")).toHaveCount(0);
+  await expect(page.getByText("Water the plants")).toBeVisible();
 
   await page.goBack();
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByText("2 todos")).toBeVisible();
+  await expect(page.getByText("Buy oat milk")).toBeVisible();
   await expect(filterLink(page, "All")).toHaveAttribute("aria-current", "page");
 
   await page.goForward();
@@ -96,7 +96,7 @@ test("a bad status in the URL falls back to All", async ({ page }) => {
   await page.goto("/?status=done");
 
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByText("2 todos")).toBeVisible();
+  await expect(page.getByText("Buy oat milk")).toBeVisible();
   await expect(filterLink(page, "All")).toHaveAttribute("aria-current", "page");
   expect(requests).toEqual(["/todos"]);
 });

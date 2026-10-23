@@ -64,7 +64,6 @@ export function HomePage() {
       <TodoList
         state={state}
         filter={filter}
-        totalItems={query.data?.totalItems}
         completion={completion}
         replacement={replacement}
         deletion={deletion}

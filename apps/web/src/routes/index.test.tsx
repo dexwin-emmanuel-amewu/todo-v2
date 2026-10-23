@@ -323,7 +323,8 @@ describe("HomePage", () => {
 
       renderPage("/");
 
-      expect(await screen.findByText("2 todos")).toBeInTheDocument();
+      expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
+      expect(screen.getByText("Water the plants")).toBeInTheDocument();
       expect(await filterLink("All")).toHaveAttribute("aria-current", "page");
       expect(requestedUrls()).toEqual(["/todos"]);
     });
@@ -335,7 +336,6 @@ describe("HomePage", () => {
 
       expect(await screen.findByText("Water the plants")).toBeInTheDocument();
       expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument();
-      expect(screen.getByText("1 completed todo")).toBeInTheDocument();
       expect(await filterLink("Completed")).toHaveAttribute("aria-current", "page");
       expect(await filterLink("All")).not.toHaveAttribute("aria-current");
       expect(requestedUrls()).toEqual(["/todos?status=completed"]);
@@ -346,7 +346,7 @@ describe("HomePage", () => {
 
       const { router } = renderPage("/?status=done");
 
-      expect(await screen.findByText("2 todos")).toBeInTheDocument();
+      expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
       expect(router.state.location.href).toBe("/");
       expect(await filterLink("All")).toHaveAttribute("aria-current", "page");
       expect(requestedUrls()).toEqual(["/todos"]);
@@ -357,7 +357,8 @@ describe("HomePage", () => {
 
       const { router } = renderPage("/?status=active&page=2");
 
-      expect(await screen.findByText("1 active todo")).toBeInTheDocument();
+      expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
+      expect(screen.queryByText("Water the plants")).not.toBeInTheDocument();
       expect(router.state.location.href).toBe("/?status=active");
       expect(requestedUrls()).toEqual(["/todos?status=active"]);
     });
@@ -377,13 +378,11 @@ describe("HomePage", () => {
       expect(await screen.findByRole("status")).toHaveTextContent(/loading todos/i);
       expect(screen.queryByText("Water the plants")).not.toBeInTheDocument();
       expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument();
-      expect(screen.queryByText("2 todos")).not.toBeInTheDocument();
 
       resolveActive(jsonResponse(listBody([todos[0]])));
 
       expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
       expect(screen.queryByText("Water the plants")).not.toBeInTheDocument();
-      expect(screen.getByText("1 active todo")).toBeInTheDocument();
       expect(await filterLink("Active")).toHaveAttribute("aria-current", "page");
       expect(requestedUrls()).toEqual(["/todos", "/todos?status=active"]);
     });
@@ -391,15 +390,16 @@ describe("HomePage", () => {
     it("restores the earlier filter from history", async () => {
       respondByStatus(todos);
       const { history, router } = renderPage("/");
-      await screen.findByText("2 todos");
+      await screen.findByText("Buy oat milk");
 
       await userEvent.click(await filterLink("Completed"));
-      await screen.findByText("1 completed todo");
+      await waitFor(() => expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument());
+      expect(await screen.findByText("Water the plants")).toBeInTheDocument();
 
       history.back();
 
       await waitFor(() => expect(router.state.location.href).toBe("/"));
-      expect(await screen.findByText("2 todos")).toBeInTheDocument();
+      expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
       expect(await filterLink("All")).toHaveAttribute("aria-current", "page");
     });
 

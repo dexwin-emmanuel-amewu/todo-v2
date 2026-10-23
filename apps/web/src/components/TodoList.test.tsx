@@ -469,43 +469,14 @@ describe("TodoList", () => {
   });
 
   describe("status filter", () => {
-    it("shows a count for each filter from the server total", () => {
-      const { rerender } = render(
-        <TodoList state={{ state: "ready", items }} filter="all" totalItems={3} />,
-      );
-      expect(screen.getByText("3 todos")).toBeInTheDocument();
-
-      rerender(
-        <TodoList state={{ state: "ready", items: [items[0]] }} filter="active" totalItems={1} />,
-      );
-      expect(screen.getByText("1 active todo")).toBeInTheDocument();
-
-      rerender(
-        <TodoList
-          state={{ state: "ready", items: [items[1]] }}
-          filter="completed"
-          totalItems={25}
-        />,
-      );
-      expect(screen.getByText("25 completed todos")).toBeInTheDocument();
-    });
-
-    it("shows no count while the first load for a filter is in progress", () => {
-      render(<TodoList state={{ state: "initial_loading" }} filter="active" />);
-
-      expect(screen.getByRole("status")).toHaveTextContent("Loading todos");
-      expect(screen.queryByText(/active todo/)).not.toBeInTheDocument();
-    });
-
     it.each([
       ["all", "No todos yet."],
       ["active", "No active todos."],
       ["completed", "No completed todos."],
-    ] as const)("shows the %s empty message and no count", (filter, message) => {
-      render(<TodoList state={{ state: "ready", items: [] }} filter={filter} totalItems={0} />);
+    ] as const)("shows the %s empty message", (filter, message) => {
+      render(<TodoList state={{ state: "ready", items: [] }} filter={filter} />);
 
       expect(screen.getByRole("heading", { name: message })).toBeInTheDocument();
-      expect(screen.queryByText(/^0 /)).not.toBeInTheDocument();
     });
   });
 });

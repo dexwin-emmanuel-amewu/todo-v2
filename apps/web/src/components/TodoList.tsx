@@ -64,11 +64,6 @@ const emptyMessages: Record<TodoStatusFilter, string> = {
   completed: "No completed todos.",
 };
 
-function countLabel(filter: TodoStatusFilter, totalItems: number): string {
-  const noun = totalItems === 1 ? "todo" : "todos";
-  return filter === "all" ? `${totalItems} ${noun}` : `${totalItems} ${filter} ${noun}`;
-}
-
 function completionErrorMessage(error: unknown): string {
   return match(error)
     .with(P.instanceOf(TodoApiError), ({ type, status }) =>
@@ -172,7 +167,6 @@ function TodoListItem({
     controls.isPending || replacement.isPending || deletion.isPending || anotherRowIsEditing;
   const hasError = controls.error != null && controls.errorTodoId === todo.id;
   const hasDeletionError = deletion.error != null && deletion.errorTodoId === todo.id;
-  const isDeleting = deletion.isPending && deletion.pendingTodoId === todo.id;
 
   useLayoutEffect(() => {
     if (isEditing) {
@@ -280,22 +274,17 @@ function TodoListItem({
               {todo.completed ? "Completed" : "Active"}
             </span>
             <button type="submit" disabled={isPending} className={retryClassName}>
-              {isPending ? "Saving…" : "Save"}
+              Save
             </button>
             <button
               type="button"
               disabled={isPending}
               onClick={cancelEditing}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 disabled:cursor-wait"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
             >
               Cancel
             </button>
           </div>
-          {isPending && (
-            <p role="status" aria-live="polite" className="w-full text-sm text-slate-600">
-              Saving
-            </p>
-          )}
           {requestError != null && (
             <div
               role="alert"
@@ -322,7 +311,7 @@ function TodoListItem({
               disabled={controlsAreDisabled}
               aria-label={`Mark ${todo.title} as ${todo.completed ? "active" : "completed"}`}
               onChange={() => controls.onToggle(todo.id, !todo.completed)}
-              className="size-4 shrink-0 accent-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 disabled:cursor-wait"
+              className="size-4 shrink-0 accent-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
             />
             <span
               onDoubleClick={beginEditing}
@@ -342,23 +331,13 @@ function TodoListItem({
             >
               {todo.completed ? "Completed" : "Active"}
             </span>
-            {controls.isPending && controls.pendingTodoId === todo.id && (
-              <span role="status" aria-live="polite" className="text-xs text-slate-600">
-                Updating…
-              </span>
-            )}
-            {isDeleting && (
-              <span role="status" aria-live="polite" className="text-xs text-slate-600">
-                Deleting {todo.title}
-              </span>
-            )}
             <button
               ref={(button) => registerEditButton(todo.id, button)}
               type="button"
               disabled={controlsAreDisabled}
               aria-label={`Edit ${todo.title}`}
               onClick={beginEditing}
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 disabled:cursor-wait"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
             >
               Edit
             </button>
@@ -368,9 +347,9 @@ function TodoListItem({
               disabled={controlsAreDisabled}
               aria-label={`Delete ${todo.title}`}
               onClick={() => onDelete(todo)}
-              className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-wait disabled:opacity-60"
+              className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700"
             >
-              {isDeleting ? "Deleting…" : "Delete"}
+              Delete
             </button>
           </div>
         </>
@@ -414,6 +393,7 @@ function TodoListItem({
 function TodoItems({
   items,
   busy,
+  refreshing,
   controls,
   replacement,
   deletion,
@@ -428,6 +408,7 @@ function TodoItems({
 }: {
   items: Todo[];
   busy: boolean;
+  refreshing: boolean;
   controls: CompletionControls;
   replacement: ReplacementControls;
   deletion: DeletionControls;
@@ -451,10 +432,7 @@ function TodoItems({
   }
 
   return (
-    <ul
-      aria-busy={busy}
-      className={`${cardClassName} divide-y divide-slate-200 ${busy ? "opacity-60" : ""}`}
-    >
+    <ul aria-busy={busy || refreshing} className={`${cardClassName} divide-y divide-slate-200`}>
       {items.map((todo) => (
         <TodoListItem
           key={todo.id}
@@ -475,6 +453,19 @@ function TodoItems({
   );
 }
 
+// Fixed to the viewport so loading and refreshing never change the list's layout.
+function BackgroundStatus({ message }: { message: string }) {
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      className="pointer-events-none fixed inset-x-0 bottom-4 mx-auto w-fit rounded-full bg-slate-900 px-4 py-1.5 text-sm text-white shadow-lg"
+    >
+      {message}
+    </p>
+  );
+}
+
 function RetryButton({ retry }: { retry: () => void }) {
   return (
     <button type="button" onClick={retry} className={retryClassName}>
@@ -489,11 +480,9 @@ export function TodoList({
   replacement = noReplacementControls,
   deletion = noDeletionControls,
   filter = "all",
-  totalItems,
 }: {
   state: TodoListViewState;
   filter?: TodoStatusFilter;
-  totalItems?: number;
   completion?: CompletionControls;
   replacement?: ReplacementControls;
   deletion?: DeletionControls;
@@ -509,6 +498,8 @@ export function TodoList({
   };
   const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const emptyHeadingRef = useRef<HTMLHeadingElement>(null);
+  const areaRef = useRef<HTMLDivElement>(null);
+  const lastAreaHeight = useRef(0);
   const deletionInFlight = useRef(false);
   const pendingDeletionFocus = useRef<{ todoId: string; nextId?: string; prevId?: string } | null>(
     null,
@@ -557,6 +548,18 @@ export function TodoList({
     else if (items.length === 0) emptyHeadingRef.current?.focus();
   }, [items]);
 
+  // Holds the area at the last list's height while a new filter loads, so the page does not jump.
+  useLayoutEffect(() => {
+    const area = areaRef.current;
+    if (!area) return;
+    if (state.state === "initial_loading") {
+      area.style.minHeight = `${lastAreaHeight.current}px`;
+    } else {
+      area.style.minHeight = "";
+      lastAreaHeight.current = area.offsetHeight;
+    }
+  });
+
   useLayoutEffect(() => {
     const previousTodoId = previousEditingTodoId.current;
     if (previousTodoId && activeEditingId === null) {
@@ -565,14 +568,8 @@ export function TodoList({
     previousEditingTodoId.current = activeEditingId;
   }, [activeEditingId]);
 
-  return match(state)
-    .with({ state: "initial_loading" }, () => (
-      <div className={cardClassName}>
-        <p role="status" aria-live="polite" className={messageClassName}>
-          Loading todos
-        </p>
-      </div>
-    ))
+  const content = match(state)
+    .with({ state: "initial_loading" }, () => null)
     .with({ state: "initial_failure" }, ({ retry }) => (
       <div role="alert" className={alertClassName}>
         <p>Could not load your todos.</p>
@@ -581,14 +578,6 @@ export function TodoList({
     ))
     .with({ state: P.union("ready", "refreshing", "refresh_failure") }, (listState) => (
       <div className="space-y-3">
-        {listState.state === "refreshing" && (
-          <p role="status" aria-live="polite" className="text-sm text-slate-500">
-            Refreshing
-          </p>
-        )}
-        {totalItems !== undefined && totalItems > 0 && (
-          <p className="text-sm text-slate-600">{countLabel(filter, totalItems)}</p>
-        )}
         {listState.state === "refresh_failure" && (
           <div role="alert" className={alertClassName}>
             <p>Could not refresh your todos. Showing the last list that loaded.</p>
@@ -597,7 +586,8 @@ export function TodoList({
         )}
         <TodoItems
           items={listState.items}
-          busy={listState.state === "refreshing" || busy}
+          busy={busy}
+          refreshing={listState.state === "refreshing"}
           controls={completion}
           replacement={replacement}
           deletion={deletion}
@@ -613,4 +603,25 @@ export function TodoList({
       </div>
     ))
     .exhaustive();
+
+  const statusMessage = deletion.isPending
+    ? `Deleting ${items?.find((item) => item.id === deletion.pendingTodoId)?.title ?? "todo"}`
+    : completion.isPending
+      ? "Updating…"
+      : replacement.isPending
+        ? "Saving"
+        : state.state === "refreshing"
+          ? "Refreshing"
+          : state.state === "initial_loading"
+            ? "Loading todos"
+            : null;
+
+  return (
+    <>
+      <div ref={areaRef} className="min-h-40">
+        {content}
+      </div>
+      {statusMessage && <BackgroundStatus message={statusMessage} />}
+    </>
+  );
 }
