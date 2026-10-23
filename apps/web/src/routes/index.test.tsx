@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { HomePage } from "./index";
+import { createAppRouter } from "../router";
 
 const todos = [
   {
@@ -53,25 +53,49 @@ function mockFetch() {
   return globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
 }
 
-function renderPage() {
+function renderPage(url = "/") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 0 } },
   });
+  const history = createMemoryHistory({ initialEntries: [url] });
+  const router = createAppRouter(history);
 
-  function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
-  }
+  render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
+  return { router, history };
+}
 
-  return render(<HomePage />, { wrapper: Wrapper });
+function respondByStatus(items: typeof todos) {
+  mockFetch().mockImplementation(async (url: string) => {
+    if (url.endsWith("status=active")) {
+      return jsonResponse(listBody(items.filter((todo) => !todo.completed)));
+    }
+    if (url.endsWith("status=completed")) {
+      return jsonResponse(listBody(items.filter((todo) => todo.completed)));
+    }
+    return jsonResponse(listBody(items));
+  });
+}
+
+function requestedUrls() {
+  return mockFetch().mock.calls.map(([url]) => url as string);
+}
+
+async function filterLink(name: string) {
+  const nav = await screen.findByRole("navigation", { name: "Filter todos" });
+  return within(nav).getByRole("link", { name });
 }
 
 describe("HomePage", () => {
-  it("renders the heading", () => {
+  it("renders the heading", async () => {
     mockFetch().mockResolvedValue(jsonResponse(listBody(todos)));
 
     renderPage();
 
-    expect(screen.getByRole("heading", { name: "Todo" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Todo" })).toBeInTheDocument();
   });
 
   it("shows loading, then the todos", async () => {
@@ -79,7 +103,7 @@ describe("HomePage", () => {
 
     renderPage();
 
-    expect(screen.getByRole("status")).toHaveTextContent(/loading todos/i);
+    expect(await screen.findByRole("status")).toHaveTextContent(/loading todos/i);
 
     expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
     expect(screen.getByText("Water the plants")).toBeInTheDocument();
@@ -156,5 +180,245 @@ describe("HomePage", () => {
     expect(mockFetch()).toHaveBeenCalledTimes(3);
     expect(mockFetch().mock.calls[1][1].method).toBe("POST");
     expect(mockFetch().mock.calls[2][1].method).toBe("GET");
+  });
+
+  it("patches one todo and refreshes the server-confirmed completion state", async () => {
+    const completedTodo = { ...todos[0], completed: true };
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+      .mockResolvedValueOnce(jsonResponse(completedTodo))
+      .mockResolvedValueOnce(jsonResponse(listBody([completedTodo, todos[1]])));
+
+    renderPage();
+    await screen.findByText("Buy oat milk");
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" }));
+
+    expect(
+      await screen.findByRole("checkbox", { name: "Mark Buy oat milk as active" }),
+    ).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Mark Water the plants as active" })).toBeChecked();
+    expect(mockFetch()).toHaveBeenCalledTimes(3);
+    expect(mockFetch().mock.calls[1][0]).toBe(`/todos/${todos[0].id}`);
+    expect(mockFetch().mock.calls[1][1]).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ completed: true }),
+    });
+    expect(mockFetch().mock.calls[2][1].method).toBe("GET");
+  });
+
+  it("keeps the checkbox unchanged after a failed update and allows retry", async () => {
+    const completedTodo = { ...todos[0], completed: true };
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+      .mockRejectedValueOnce(new TypeError("offline"))
+      .mockResolvedValueOnce(jsonResponse(completedTodo))
+      .mockResolvedValueOnce(jsonResponse(listBody([completedTodo, todos[1]])));
+
+    renderPage();
+    await screen.findByText("Buy oat milk");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not reach the server/i);
+    expect(
+      screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" }),
+    ).not.toBeChecked();
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry update" }));
+
+    expect(
+      await screen.findByRole("checkbox", { name: "Mark Buy oat milk as active" }),
+    ).toBeChecked();
+    expect(mockFetch()).toHaveBeenCalledTimes(4);
+    expect(mockFetch().mock.calls[2][1].body).toBe(JSON.stringify({ completed: true }));
+  });
+
+  it("replaces a title with PUT and preserves the todo completion value", async () => {
+    const updatedTodo = { ...todos[1], title: "Water the plants indoors" };
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+      .mockResolvedValueOnce(jsonResponse(updatedTodo))
+      .mockResolvedValueOnce(jsonResponse(listBody([todos[0], updatedTodo])));
+
+    renderPage();
+    await screen.findByText("Water the plants");
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit Water the plants" }));
+    const input = screen.getByRole("textbox", { name: "Edit title for Water the plants" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "Water the plants indoors");
+    await userEvent.keyboard("{Enter}");
+
+    expect(await screen.findByText("Water the plants indoors")).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "Mark Water the plants indoors as active" }),
+    ).toBeChecked();
+    expect(mockFetch()).toHaveBeenCalledTimes(3);
+    expect(mockFetch().mock.calls[1][0]).toBe(`/todos/${todos[1].id}`);
+    expect(mockFetch().mock.calls[1][1]).toMatchObject({
+      method: "PUT",
+      body: JSON.stringify({ title: "Water the plants indoors", completed: true }),
+    });
+    expect(mockFetch().mock.calls[2][1].method).toBe("GET");
+  });
+
+  it("deletes one todo with a bodyless DELETE and refreshes the list", async () => {
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(jsonResponse(listBody([todos[1]])));
+
+    renderPage();
+    await screen.findByText("Buy oat milk");
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete Buy oat milk" }));
+
+    await waitFor(() => expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument());
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Delete Water the plants" })).toHaveFocus();
+    expect(mockFetch()).toHaveBeenCalledTimes(3);
+    expect(mockFetch().mock.calls[1][0]).toBe(`/todos/${todos[0].id}`);
+    expect(mockFetch().mock.calls[1][1].method).toBe("DELETE");
+    expect(mockFetch().mock.calls[1][1].body).toBeUndefined();
+    expect(mockFetch().mock.calls[2][1].method).toBe("GET");
+  });
+
+  it("keeps the row after a failed delete and allows retry", async () => {
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+      .mockResolvedValueOnce(jsonResponse({}, 500))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(jsonResponse(listBody([todos[1]])));
+
+    renderPage();
+    await screen.findByText("Buy oat milk");
+    await userEvent.click(screen.getByRole("button", { name: "Delete Buy oat milk" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not delete this todo/i);
+    expect(screen.getByText("Buy oat milk")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry delete" }));
+
+    await waitFor(() => expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument());
+    expect(mockFetch()).toHaveBeenCalledTimes(4);
+  });
+
+  it("refreshes the list after a 404 and removes the stale row", async () => {
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+      .mockResolvedValueOnce(jsonResponse({}, 404))
+      .mockResolvedValueOnce(jsonResponse(listBody([todos[1]])));
+
+    renderPage();
+    await screen.findByText("Buy oat milk");
+    await userEvent.click(screen.getByRole("button", { name: "Delete Buy oat milk" }));
+
+    await waitFor(() => expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument());
+    expect(mockFetch().mock.calls[2][1].method).toBe("GET");
+  });
+
+  describe("status filter", () => {
+    it("selects All and requests the unfiltered list on the default URL", async () => {
+      respondByStatus(todos);
+
+      renderPage("/");
+
+      expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
+      expect(screen.getByText("Water the plants")).toBeInTheDocument();
+      expect(await filterLink("All")).toHaveAttribute("aria-current", "page");
+      expect(requestedUrls()).toEqual(["/todos"]);
+    });
+
+    it("selects the filter from the URL and requests it from the server", async () => {
+      respondByStatus(todos);
+
+      renderPage("/?status=completed");
+
+      expect(await screen.findByText("Water the plants")).toBeInTheDocument();
+      expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument();
+      expect(await filterLink("Completed")).toHaveAttribute("aria-current", "page");
+      expect(await filterLink("All")).not.toHaveAttribute("aria-current");
+      expect(requestedUrls()).toEqual(["/todos?status=completed"]);
+    });
+
+    it("falls back to All and replaces a bad status in the URL", async () => {
+      respondByStatus(todos);
+
+      const { router } = renderPage("/?status=done");
+
+      expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/");
+      expect(await filterLink("All")).toHaveAttribute("aria-current", "page");
+      expect(requestedUrls()).toEqual(["/todos"]);
+    });
+
+    it("keeps a good status and drops unknown search params", async () => {
+      respondByStatus(todos);
+
+      const { router } = renderPage("/?status=active&page=2");
+
+      expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
+      expect(screen.queryByText("Water the plants")).not.toBeInTheDocument();
+      expect(router.state.location.href).toBe("/?status=active");
+      expect(requestedUrls()).toEqual(["/todos?status=active"]);
+    });
+
+    it("loads the chosen filter without showing rows from the previous filter", async () => {
+      let resolveActive: (response: Response) => void = () => {};
+      mockFetch()
+        .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+        .mockReturnValueOnce(new Promise<Response>((resolve) => (resolveActive = resolve)));
+
+      const { router } = renderPage("/");
+      await screen.findByText("Water the plants");
+
+      await userEvent.click(await filterLink("Active"));
+
+      expect(router.state.location.href).toBe("/?status=active");
+      expect(await screen.findByRole("status")).toHaveTextContent(/loading todos/i);
+      expect(screen.queryByText("Water the plants")).not.toBeInTheDocument();
+      expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument();
+
+      resolveActive(jsonResponse(listBody([todos[0]])));
+
+      expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
+      expect(screen.queryByText("Water the plants")).not.toBeInTheDocument();
+      expect(await filterLink("Active")).toHaveAttribute("aria-current", "page");
+      expect(requestedUrls()).toEqual(["/todos", "/todos?status=active"]);
+    });
+
+    it("restores the earlier filter from history", async () => {
+      respondByStatus(todos);
+      const { history, router } = renderPage("/");
+      await screen.findByText("Buy oat milk");
+
+      await userEvent.click(await filterLink("Completed"));
+      await waitFor(() => expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument());
+      expect(await screen.findByText("Water the plants")).toBeInTheDocument();
+
+      history.back();
+
+      await waitFor(() => expect(router.state.location.href).toBe("/"));
+      expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
+      expect(await filterLink("All")).toHaveAttribute("aria-current", "page");
+    });
+
+    it("removes a todo from the Active view once it is completed", async () => {
+      const completedTodo = { ...todos[0], completed: true };
+      mockFetch()
+        .mockResolvedValueOnce(jsonResponse(listBody([todos[0]])))
+        .mockResolvedValueOnce(jsonResponse(completedTodo))
+        .mockResolvedValueOnce(jsonResponse(listBody([])));
+
+      renderPage("/?status=active");
+      await screen.findByText("Buy oat milk");
+
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" }),
+      );
+
+      expect(await screen.findByRole("heading", { name: "No active todos." })).toBeInTheDocument();
+      expect(requestedUrls()[2]).toBe("/todos?status=active");
+    });
   });
 });

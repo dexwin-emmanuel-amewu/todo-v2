@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createTodo, fetchTodoList, TODO_API_BASE_URL, TodoApiError } from "./todo.api";
+import {
+  createTodo,
+  deleteTodo,
+  fetchTodoList,
+  patchTodoCompletion,
+  replaceTodo,
+  TODO_API_BASE_URL,
+  TodoApiError,
+} from "./todo.api";
 
 const todo = {
   id: "5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a",
@@ -50,6 +58,39 @@ describe("fetchTodoList", () => {
     expect(url).toBe(`${TODO_API_BASE_URL}/todos`);
     expect(url).toBe("/todos");
     expect(init).toMatchObject({ method: "GET" });
+  });
+
+  it("sends no status param for the all filter", async () => {
+    mockFetch().mockResolvedValue(jsonResponse(listBody));
+
+    await fetchTodoList("all");
+
+    expect(mockFetch().mock.calls[0][0]).toBe("/todos");
+  });
+
+  it("sends the active and completed filters as a status param", async () => {
+    mockFetch().mockImplementation(async () => jsonResponse(listBody));
+
+    await fetchTodoList("active");
+    await fetchTodoList("completed");
+
+    expect(mockFetch().mock.calls[0][0]).toBe("/todos?status=active");
+    expect(mockFetch().mock.calls[1][0]).toBe("/todos?status=completed");
+  });
+
+  it("rejects a bad status with a request_validation error and makes no request", async () => {
+    await expect(fetchTodoList("done" as never)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    expect(mockFetch()).not.toHaveBeenCalled();
+  });
+
+  it("rejects with an http error when the API rejects the status", async () => {
+    mockFetch().mockResolvedValue(
+      jsonResponse({ error: { type: "validation", issues: ["Invalid option"] } }, 400),
+    );
+
+    await expect(fetchTodoList("active")).rejects.toMatchObject({ type: "http", status: 400 });
   });
 
   it("resolves the parsed list on a 200", async () => {
@@ -146,5 +187,169 @@ describe("createTodo", () => {
     await expect(createTodo("Buy oat milk")).rejects.toMatchObject({
       type: "response_validation",
     });
+  });
+});
+
+describe("patchTodoCompletion", () => {
+  it("patches the completion value and parses the updated todo", async () => {
+    const completedTodo = { ...todo, completed: true };
+    mockFetch().mockResolvedValue(jsonResponse(completedTodo));
+
+    await expect(patchTodoCompletion(todo.id, true)).resolves.toEqual(completedTodo);
+    expect(mockFetch()).toHaveBeenCalledWith(`${TODO_API_BASE_URL}/todos/${todo.id}`, {
+      method: "PATCH",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ completed: true }),
+    });
+  });
+
+  it("rejects invalid ids or bodies without making a request", async () => {
+    await expect(patchTodoCompletion("not-a-uuid", true)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    await expect(patchTodoCompletion(todo.id, "true" as unknown as boolean)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    expect(mockFetch()).not.toHaveBeenCalled();
+  });
+
+  it("wraps network, HTTP, and invalid response failures", async () => {
+    mockFetch().mockRejectedValueOnce(new TypeError("offline"));
+    await expect(patchTodoCompletion(todo.id, true)).rejects.toMatchObject({ type: "network" });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({}, 404));
+    await expect(patchTodoCompletion(todo.id, true)).rejects.toMatchObject({
+      type: "http",
+      status: 404,
+    });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({ id: todo.id }));
+    await expect(patchTodoCompletion(todo.id, true)).rejects.toMatchObject({
+      type: "response_validation",
+    });
+  });
+});
+
+describe("replaceTodo", () => {
+  it("sends the complete replacement body and parses the updated todo", async () => {
+    const updatedTodo = { ...todo, title: "Buy oat milk tomorrow", completed: true };
+    mockFetch().mockResolvedValue(jsonResponse(updatedTodo));
+
+    await expect(replaceTodo(todo.id, " Buy oat milk tomorrow ", true)).resolves.toEqual(
+      updatedTodo,
+    );
+    expect(mockFetch()).toHaveBeenCalledWith(`${TODO_API_BASE_URL}/todos/${todo.id}`, {
+      method: "PUT",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Buy oat milk tomorrow", completed: true }),
+    });
+  });
+
+  it("rejects invalid ids and replacement data without calling fetch", async () => {
+    await expect(replaceTodo("bad-id", "Buy oat milk", false)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    await expect(replaceTodo(todo.id, "short", false)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    await expect(
+      replaceTodo(todo.id, "Buy oat milk", "false" as unknown as boolean),
+    ).rejects.toMatchObject({ type: "request_validation" });
+    expect(mockFetch()).not.toHaveBeenCalled();
+  });
+
+  it("maps network, HTTP, and invalid response failures", async () => {
+    mockFetch().mockRejectedValueOnce(new TypeError("offline"));
+    await expect(replaceTodo(todo.id, "Buy oat milk", false)).rejects.toMatchObject({
+      type: "network",
+    });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({}, 500));
+    await expect(replaceTodo(todo.id, "Buy oat milk", false)).rejects.toMatchObject({
+      type: "http",
+      status: 500,
+    });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({ id: todo.id }));
+    await expect(replaceTodo(todo.id, "Buy oat milk", false)).rejects.toMatchObject({
+      type: "response_validation",
+    });
+  });
+});
+
+describe("replaceTodo", () => {
+  it("puts the complete mutable representation and parses the updated todo", async () => {
+    const updatedTodo = { ...todo, title: "Buy oat milk", completed: true };
+    mockFetch().mockResolvedValue(jsonResponse(updatedTodo));
+
+    await expect(replaceTodo(todo.id, "  Buy oat milk  ", true)).resolves.toEqual(updatedTodo);
+    expect(mockFetch()).toHaveBeenCalledWith(`${TODO_API_BASE_URL}/todos/${todo.id}`, {
+      method: "PUT",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Buy oat milk", completed: true }),
+    });
+  });
+
+  it("rejects invalid ids or replacement bodies without making a request", async () => {
+    await expect(replaceTodo("not-a-uuid", "Buy oat milk", false)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    await expect(replaceTodo(todo.id, "abc", false)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    await expect(
+      replaceTodo(todo.id, "Buy oat milk", "false" as unknown as boolean),
+    ).rejects.toMatchObject({ type: "request_validation" });
+    expect(mockFetch()).not.toHaveBeenCalled();
+  });
+
+  it("wraps network, HTTP, and invalid response failures", async () => {
+    mockFetch().mockRejectedValueOnce(new TypeError("offline"));
+    await expect(replaceTodo(todo.id, "Buy oat milk", false)).rejects.toMatchObject({
+      type: "network",
+    });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({}, 500));
+    await expect(replaceTodo(todo.id, "Buy oat milk", false)).rejects.toMatchObject({
+      type: "http",
+      status: 500,
+    });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({ id: todo.id }));
+    await expect(replaceTodo(todo.id, "Buy oat milk", false)).rejects.toMatchObject({
+      type: "response_validation",
+    });
+  });
+});
+
+describe("deleteTodo", () => {
+  it("sends a bodyless DELETE and resolves on 204 without reading the body", async () => {
+    const response = new Response(null, { status: 204 });
+    const json = vi.spyOn(response, "json");
+    mockFetch().mockResolvedValue(response);
+
+    await expect(deleteTodo(todo.id)).resolves.toBeUndefined();
+    expect(mockFetch()).toHaveBeenCalledTimes(1);
+    expect(mockFetch()).toHaveBeenCalledWith(`${TODO_API_BASE_URL}/todos/${todo.id}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+    expect(json).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malformed id without making a request", async () => {
+    await expect(deleteTodo("not-a-uuid")).rejects.toMatchObject({ type: "request_validation" });
+    expect(mockFetch()).not.toHaveBeenCalled();
+  });
+
+  it("wraps network and HTTP failures, including 404 and 500", async () => {
+    mockFetch().mockRejectedValueOnce(new TypeError("offline"));
+    await expect(deleteTodo(todo.id)).rejects.toMatchObject({ type: "network" });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({}, 404));
+    await expect(deleteTodo(todo.id)).rejects.toMatchObject({ type: "http", status: 404 });
+
+    mockFetch().mockResolvedValueOnce(jsonResponse({}, 500));
+    await expect(deleteTodo(todo.id)).rejects.toMatchObject({ type: "http", status: 500 });
   });
 });
