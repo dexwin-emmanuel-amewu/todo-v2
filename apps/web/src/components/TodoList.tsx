@@ -1,4 +1,4 @@
-import { replaceTodoSchema, type Todo } from "@todo/contracts";
+import { replaceTodoSchema, type Todo, type TodoStatusFilter } from "@todo/contracts";
 import {
   useEffect,
   useLayoutEffect,
@@ -57,6 +57,17 @@ const noReplacementControls: ReplacementControls = {
   isPending: false,
   onSave: async () => {},
 };
+
+const emptyMessages: Record<TodoStatusFilter, string> = {
+  all: "No todos yet.",
+  active: "No active todos.",
+  completed: "No completed todos.",
+};
+
+function countLabel(filter: TodoStatusFilter, totalItems: number): string {
+  const noun = totalItems === 1 ? "todo" : "todos";
+  return filter === "all" ? `${totalItems} ${noun}` : `${totalItems} ${filter} ${noun}`;
+}
 
 function completionErrorMessage(error: unknown): string {
   return match(error)
@@ -413,6 +424,7 @@ function TodoItems({
   registerEditButton,
   registerDeleteButton,
   emptyHeadingRef,
+  emptyMessage,
 }: {
   items: Todo[];
   busy: boolean;
@@ -426,12 +438,13 @@ function TodoItems({
   registerEditButton: (todoId: string, button: HTMLButtonElement | null) => void;
   registerDeleteButton: (todoId: string, button: HTMLButtonElement | null) => void;
   emptyHeadingRef: RefObject<HTMLHeadingElement | null>;
+  emptyMessage: string;
 }) {
   if (items.length === 0) {
     return (
       <div className={cardClassName}>
         <h2 ref={emptyHeadingRef} tabIndex={-1} className={`${messageClassName} outline-none`}>
-          No todos yet.
+          {emptyMessage}
         </h2>
       </div>
     );
@@ -475,8 +488,12 @@ export function TodoList({
   completion = noCompletionControls,
   replacement = noReplacementControls,
   deletion = noDeletionControls,
+  filter = "all",
+  totalItems,
 }: {
   state: TodoListViewState;
+  filter?: TodoStatusFilter;
+  totalItems?: number;
   completion?: CompletionControls;
   replacement?: ReplacementControls;
   deletion?: DeletionControls;
@@ -569,6 +586,9 @@ export function TodoList({
             Refreshing
           </p>
         )}
+        {totalItems !== undefined && totalItems > 0 && (
+          <p className="text-sm text-slate-600">{countLabel(filter, totalItems)}</p>
+        )}
         {listState.state === "refresh_failure" && (
           <div role="alert" className={alertClassName}>
             <p>Could not refresh your todos. Showing the last list that loaded.</p>
@@ -588,6 +608,7 @@ export function TodoList({
           registerEditButton={registerEditButton}
           registerDeleteButton={registerDeleteButton}
           emptyHeadingRef={emptyHeadingRef}
+          emptyMessage={emptyMessages[filter]}
         />
       </div>
     ))

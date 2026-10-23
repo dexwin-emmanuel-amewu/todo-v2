@@ -1,12 +1,14 @@
 import {
   type Todo,
   type TodoListResponse,
+  type TodoStatusFilter,
   createTodoSchema,
   patchTodoSchema,
   replaceTodoSchema,
   todoListResponseSchema,
   todoIdParamSchema,
   todoSchema,
+  todoStatusFilterSchema,
 } from "@todo/contracts";
 
 export const TODO_API_BASE_URL = import.meta.env.VITE_API_URL ?? "";
@@ -31,11 +33,22 @@ export class TodoApiError extends Error {
   }
 }
 
-export async function fetchTodoList(): Promise<TodoListResponse> {
+export async function fetchTodoList(status: TodoStatusFilter = "all"): Promise<TodoListResponse> {
+  const parsedStatus = todoStatusFilterSchema.safeParse(status);
+
+  if (!parsedStatus.success) {
+    throw new TodoApiError("request_validation", "The todo list filter was invalid.", {
+      issues: parsedStatus.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  const query =
+    parsedStatus.data === "all" ? "" : `?${new URLSearchParams({ status: parsedStatus.data })}`;
+
   let response: Response;
 
   try {
-    response = await fetch(`${TODO_API_BASE_URL}/todos`, {
+    response = await fetch(`${TODO_API_BASE_URL}/todos${query}`, {
       method: "GET",
       headers: { Accept: "application/json" },
     });

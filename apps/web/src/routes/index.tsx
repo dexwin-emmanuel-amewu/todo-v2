@@ -1,13 +1,20 @@
+import { getRouteApi } from "@tanstack/react-router";
+
+import { TodoFilters } from "../components/TodoFilters";
 import { TodoList } from "../components/TodoList";
 import { CreateTodoForm } from "../components/CreateTodoForm";
 import { usePatchTodoCompletionMutation } from "../hooks/usePatchTodoCompletionMutation";
 import { useDeleteTodoMutation } from "../hooks/useDeleteTodoMutation";
 import { useReplaceTodoMutation } from "../hooks/useReplaceTodoMutation";
 import { useTodoListQuery } from "../hooks/useTodoListQuery";
+import { getTodoStatusFilter } from "../module/todo.filter";
 import { getTodoListViewState } from "../module/todo.state";
 
+const homeRoute = getRouteApi("/");
+
 export function HomePage() {
-  const query = useTodoListQuery();
+  const filter = getTodoStatusFilter(homeRoute.useSearch());
+  const query = useTodoListQuery(filter);
   const completionMutation = usePatchTodoCompletionMutation();
   const replacementMutation = useReplaceTodoMutation();
   const deletionMutation = useDeleteTodoMutation();
@@ -53,8 +60,11 @@ export function HomePage() {
     <main className="mx-auto max-w-md p-8">
       <h1 className="mb-4 text-2xl font-semibold">Todo</h1>
       <CreateTodoForm />
+      <TodoFilters />
       <TodoList
         state={state}
+        filter={filter}
+        totalItems={query.data?.totalItems}
         completion={completion}
         replacement={replacement}
         deletion={deletion}

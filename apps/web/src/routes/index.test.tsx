@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { HomePage } from "./index";
+import { createAppRouter } from "../router";
 
 const todos = [
   {
@@ -53,25 +53,49 @@ function mockFetch() {
   return globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
 }
 
-function renderPage() {
+function renderPage(url = "/") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 0 } },
   });
+  const history = createMemoryHistory({ initialEntries: [url] });
+  const router = createAppRouter(history);
 
-  function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
-  }
+  render(
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
+  return { router, history };
+}
 
-  return render(<HomePage />, { wrapper: Wrapper });
+function respondByStatus(items: typeof todos) {
+  mockFetch().mockImplementation(async (url: string) => {
+    if (url.endsWith("status=active")) {
+      return jsonResponse(listBody(items.filter((todo) => !todo.completed)));
+    }
+    if (url.endsWith("status=completed")) {
+      return jsonResponse(listBody(items.filter((todo) => todo.completed)));
+    }
+    return jsonResponse(listBody(items));
+  });
+}
+
+function requestedUrls() {
+  return mockFetch().mock.calls.map(([url]) => url as string);
+}
+
+async function filterLink(name: string) {
+  const nav = await screen.findByRole("navigation", { name: "Filter todos" });
+  return within(nav).getByRole("link", { name });
 }
 
 describe("HomePage", () => {
-  it("renders the heading", () => {
+  it("renders the heading", async () => {
     mockFetch().mockResolvedValue(jsonResponse(listBody(todos)));
 
     renderPage();
 
-    expect(screen.getByRole("heading", { name: "Todo" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Todo" })).toBeInTheDocument();
   });
 
   it("shows loading, then the todos", async () => {
@@ -79,7 +103,7 @@ describe("HomePage", () => {
 
     renderPage();
 
-    expect(screen.getByRole("status")).toHaveTextContent(/loading todos/i);
+    expect(await screen.findByRole("status")).toHaveTextContent(/loading todos/i);
 
     expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
     expect(screen.getByText("Water the plants")).toBeInTheDocument();
@@ -291,5 +315,110 @@ describe("HomePage", () => {
 
     await waitFor(() => expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument());
     expect(mockFetch().mock.calls[2][1].method).toBe("GET");
+  });
+
+  describe("status filter", () => {
+    it("selects All and requests the unfiltered list on the default URL", async () => {
+      respondByStatus(todos);
+
+      renderPage("/");
+
+      expect(await screen.findByText("2 todos")).toBeInTheDocument();
+      expect(await filterLink("All")).toHaveAttribute("aria-current", "page");
+      expect(requestedUrls()).toEqual(["/todos"]);
+    });
+
+    it("selects the filter from the URL and requests it from the server", async () => {
+      respondByStatus(todos);
+
+      renderPage("/?status=completed");
+
+      expect(await screen.findByText("Water the plants")).toBeInTheDocument();
+      expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument();
+      expect(screen.getByText("1 completed todo")).toBeInTheDocument();
+      expect(await filterLink("Completed")).toHaveAttribute("aria-current", "page");
+      expect(await filterLink("All")).not.toHaveAttribute("aria-current");
+      expect(requestedUrls()).toEqual(["/todos?status=completed"]);
+    });
+
+    it("falls back to All and replaces a bad status in the URL", async () => {
+      respondByStatus(todos);
+
+      const { router } = renderPage("/?status=done");
+
+      expect(await screen.findByText("2 todos")).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/");
+      expect(await filterLink("All")).toHaveAttribute("aria-current", "page");
+      expect(requestedUrls()).toEqual(["/todos"]);
+    });
+
+    it("keeps a good status and drops unknown search params", async () => {
+      respondByStatus(todos);
+
+      const { router } = renderPage("/?status=active&page=2");
+
+      expect(await screen.findByText("1 active todo")).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/?status=active");
+      expect(requestedUrls()).toEqual(["/todos?status=active"]);
+    });
+
+    it("loads the chosen filter without showing rows from the previous filter", async () => {
+      let resolveActive: (response: Response) => void = () => {};
+      mockFetch()
+        .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+        .mockReturnValueOnce(new Promise<Response>((resolve) => (resolveActive = resolve)));
+
+      const { router } = renderPage("/");
+      await screen.findByText("Water the plants");
+
+      await userEvent.click(await filterLink("Active"));
+
+      expect(router.state.location.href).toBe("/?status=active");
+      expect(await screen.findByRole("status")).toHaveTextContent(/loading todos/i);
+      expect(screen.queryByText("Water the plants")).not.toBeInTheDocument();
+      expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument();
+      expect(screen.queryByText("2 todos")).not.toBeInTheDocument();
+
+      resolveActive(jsonResponse(listBody([todos[0]])));
+
+      expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
+      expect(screen.queryByText("Water the plants")).not.toBeInTheDocument();
+      expect(screen.getByText("1 active todo")).toBeInTheDocument();
+      expect(await filterLink("Active")).toHaveAttribute("aria-current", "page");
+      expect(requestedUrls()).toEqual(["/todos", "/todos?status=active"]);
+    });
+
+    it("restores the earlier filter from history", async () => {
+      respondByStatus(todos);
+      const { history, router } = renderPage("/");
+      await screen.findByText("2 todos");
+
+      await userEvent.click(await filterLink("Completed"));
+      await screen.findByText("1 completed todo");
+
+      history.back();
+
+      await waitFor(() => expect(router.state.location.href).toBe("/"));
+      expect(await screen.findByText("2 todos")).toBeInTheDocument();
+      expect(await filterLink("All")).toHaveAttribute("aria-current", "page");
+    });
+
+    it("removes a todo from the Active view once it is completed", async () => {
+      const completedTodo = { ...todos[0], completed: true };
+      mockFetch()
+        .mockResolvedValueOnce(jsonResponse(listBody([todos[0]])))
+        .mockResolvedValueOnce(jsonResponse(completedTodo))
+        .mockResolvedValueOnce(jsonResponse(listBody([])));
+
+      renderPage("/?status=active");
+      await screen.findByText("Buy oat milk");
+
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" }),
+      );
+
+      expect(await screen.findByRole("heading", { name: "No active todos." })).toBeInTheDocument();
+      expect(requestedUrls()[2]).toBe("/todos?status=active");
+    });
   });
 });

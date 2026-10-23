@@ -60,6 +60,39 @@ describe("fetchTodoList", () => {
     expect(init).toMatchObject({ method: "GET" });
   });
 
+  it("sends no status param for the all filter", async () => {
+    mockFetch().mockResolvedValue(jsonResponse(listBody));
+
+    await fetchTodoList("all");
+
+    expect(mockFetch().mock.calls[0][0]).toBe("/todos");
+  });
+
+  it("sends the active and completed filters as a status param", async () => {
+    mockFetch().mockImplementation(async () => jsonResponse(listBody));
+
+    await fetchTodoList("active");
+    await fetchTodoList("completed");
+
+    expect(mockFetch().mock.calls[0][0]).toBe("/todos?status=active");
+    expect(mockFetch().mock.calls[1][0]).toBe("/todos?status=completed");
+  });
+
+  it("rejects a bad status with a request_validation error and makes no request", async () => {
+    await expect(fetchTodoList("done" as never)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    expect(mockFetch()).not.toHaveBeenCalled();
+  });
+
+  it("rejects with an http error when the API rejects the status", async () => {
+    mockFetch().mockResolvedValue(
+      jsonResponse({ error: { type: "validation", issues: ["Invalid option"] } }, 400),
+    );
+
+    await expect(fetchTodoList("active")).rejects.toMatchObject({ type: "http", status: 400 });
+  });
+
   it("resolves the parsed list on a 200", async () => {
     mockFetch().mockResolvedValue(jsonResponse(listBody));
 
