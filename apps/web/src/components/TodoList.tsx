@@ -140,6 +140,7 @@ function TodoListItem({
   deletion,
   isEditing,
   anotherRowIsEditing,
+  locked,
   onStartEdit,
   onCancelEdit,
   onDelete,
@@ -152,6 +153,7 @@ function TodoListItem({
   deletion: DeletionControls;
   isEditing: boolean;
   anotherRowIsEditing: boolean;
+  locked: boolean;
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onDelete: (todo: Todo) => void;
@@ -164,7 +166,11 @@ function TodoListItem({
   const inputRef = useRef<HTMLInputElement>(null);
   const isPending = replacement.isPending && isEditing;
   const controlsAreDisabled =
-    controls.isPending || replacement.isPending || deletion.isPending || anotherRowIsEditing;
+    controls.isPending ||
+    replacement.isPending ||
+    deletion.isPending ||
+    anotherRowIsEditing ||
+    locked;
   const hasError = controls.error != null && controls.errorTodoId === todo.id;
   const hasDeletionError = deletion.error != null && deletion.errorTodoId === todo.id;
 
@@ -394,6 +400,7 @@ function TodoItems({
   items,
   busy,
   refreshing,
+  locked,
   controls,
   replacement,
   deletion,
@@ -409,6 +416,7 @@ function TodoItems({
   items: Todo[];
   busy: boolean;
   refreshing: boolean;
+  locked: boolean;
   controls: CompletionControls;
   replacement: ReplacementControls;
   deletion: DeletionControls;
@@ -422,6 +430,9 @@ function TodoItems({
   emptyMessage: string;
 }) {
   if (items.length === 0) {
+    // The empty result belongs to the previous filter, so say nothing until the new one arrives.
+    if (locked) return null;
+
     return (
       <div className={cardClassName}>
         <h2 ref={emptyHeadingRef} tabIndex={-1} className={`${messageClassName} outline-none`}>
@@ -442,6 +453,7 @@ function TodoItems({
           deletion={deletion}
           isEditing={editingTodoId === todo.id}
           anotherRowIsEditing={editingTodoId !== null && editingTodoId !== todo.id}
+          locked={locked}
           onStartEdit={() => onStartEdit(todo.id)}
           onCancelEdit={onCancelEdit}
           onDelete={onDelete}
@@ -576,32 +588,36 @@ export function TodoList({
         <RetryButton retry={retry} />
       </div>
     ))
-    .with({ state: P.union("ready", "refreshing", "refresh_failure") }, (listState) => (
-      <div className="space-y-3">
-        {listState.state === "refresh_failure" && (
-          <div role="alert" className={alertClassName}>
-            <p>Could not refresh your todos. Showing the last list that loaded.</p>
-            <RetryButton retry={listState.retry} />
-          </div>
-        )}
-        <TodoItems
-          items={listState.items}
-          busy={busy}
-          refreshing={listState.state === "refreshing"}
-          controls={completion}
-          replacement={replacement}
-          deletion={deletion}
-          editingTodoId={activeEditingId}
-          onStartEdit={onStartEdit}
-          onCancelEdit={onCancelEdit}
-          onDelete={onDelete}
-          registerEditButton={registerEditButton}
-          registerDeleteButton={registerDeleteButton}
-          emptyHeadingRef={emptyHeadingRef}
-          emptyMessage={emptyMessages[filter]}
-        />
-      </div>
-    ))
+    .with(
+      { state: P.union("ready", "loading_filter", "refreshing", "refresh_failure") },
+      (listState) => (
+        <div className="space-y-3">
+          {listState.state === "refresh_failure" && (
+            <div role="alert" className={alertClassName}>
+              <p>Could not refresh your todos. Showing the last list that loaded.</p>
+              <RetryButton retry={listState.retry} />
+            </div>
+          )}
+          <TodoItems
+            items={listState.items}
+            busy={busy}
+            refreshing={listState.state === "refreshing" || listState.state === "loading_filter"}
+            locked={listState.state === "loading_filter"}
+            controls={completion}
+            replacement={replacement}
+            deletion={deletion}
+            editingTodoId={activeEditingId}
+            onStartEdit={onStartEdit}
+            onCancelEdit={onCancelEdit}
+            onDelete={onDelete}
+            registerEditButton={registerEditButton}
+            registerDeleteButton={registerDeleteButton}
+            emptyHeadingRef={emptyHeadingRef}
+            emptyMessage={emptyMessages[filter]}
+          />
+        </div>
+      ),
+    )
     .exhaustive();
 
   const statusMessage = deletion.isPending
@@ -610,11 +626,13 @@ export function TodoList({
       ? "Updating…"
       : replacement.isPending
         ? "Saving"
-        : state.state === "refreshing"
-          ? "Refreshing"
-          : state.state === "initial_loading"
-            ? "Loading todos"
-            : null;
+        : state.state === "loading_filter"
+          ? `Loading ${filter === "all" ? "" : `${filter} `}todos`
+          : state.state === "refreshing"
+            ? "Refreshing"
+            : state.state === "initial_loading"
+              ? "Loading todos"
+              : null;
 
   return (
     <>

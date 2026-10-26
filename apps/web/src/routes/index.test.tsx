@@ -363,7 +363,7 @@ describe("HomePage", () => {
       expect(requestedUrls()).toEqual(["/todos?status=active"]);
     });
 
-    it("loads the chosen filter without showing rows from the previous filter", async () => {
+    it("keeps the old rows disabled while the chosen filter loads, then swaps them", async () => {
       let resolveActive: (response: Response) => void = () => {};
       mockFetch()
         .mockResolvedValueOnce(jsonResponse(listBody(todos)))
@@ -375,14 +375,16 @@ describe("HomePage", () => {
       await userEvent.click(await filterLink("Active"));
 
       expect(router.state.location.href).toBe("/?status=active");
-      expect(await screen.findByRole("status")).toHaveTextContent(/loading todos/i);
-      expect(screen.queryByText("Water the plants")).not.toBeInTheDocument();
-      expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument();
+      expect(await screen.findByRole("status")).toHaveTextContent("Loading active todos");
+      expect(screen.getByText("Water the plants")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Delete Buy oat milk" })).toBeDisabled();
 
       resolveActive(jsonResponse(listBody([todos[0]])));
 
-      expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
-      expect(screen.queryByText("Water the plants")).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByText("Water the plants")).not.toBeInTheDocument());
+      expect(screen.getByText("Buy oat milk")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Delete Buy oat milk" })).toBeEnabled();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
       expect(await filterLink("Active")).toHaveAttribute("aria-current", "page");
       expect(requestedUrls()).toEqual(["/todos", "/todos?status=active"]);
     });

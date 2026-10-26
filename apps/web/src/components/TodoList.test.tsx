@@ -469,6 +469,25 @@ describe("TodoList", () => {
   });
 
   describe("status filter", () => {
+    it("keeps the old rows, disables their actions, and announces the filter loading", () => {
+      render(<TodoList state={{ state: "loading_filter", items }} filter="active" />);
+
+      expect(screen.getAllByRole("listitem")).toHaveLength(3);
+      expect(screen.getByRole("status")).toHaveTextContent("Loading active todos");
+      expect(
+        screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" }),
+      ).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Edit Buy oat milk" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Delete Buy oat milk" })).toBeDisabled();
+    });
+
+    it("shows no empty message for the new filter while old empty results are loading", () => {
+      render(<TodoList state={{ state: "loading_filter", items: [] }} filter="completed" />);
+
+      expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent("Loading completed todos");
+    });
+
     it.each([
       ["all", "No todos yet."],
       ["active", "No active todos."],

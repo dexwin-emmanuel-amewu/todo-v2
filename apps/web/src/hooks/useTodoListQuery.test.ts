@@ -89,16 +89,17 @@ describe("useTodoListQuery", () => {
     expect(result.current.data?.items).toEqual([completedTodo]);
   });
 
-  it("does not show another filter's data while a new filter loads", async () => {
+  it("keeps the previous list as placeholder data while a new filter loads", async () => {
     respondByStatus();
     const { result, rerender } = renderListHook("all");
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     rerender({ status: "active" });
 
-    expect(result.current.status).toBe("pending");
-    expect(result.current.data).toBeUndefined();
-    await waitFor(() => expect(result.current.data?.items).toEqual([activeTodo]));
+    expect(result.current.isPlaceholderData).toBe(true);
+    expect(result.current.data?.items).toEqual([activeTodo, completedTodo]);
+    await waitFor(() => expect(result.current.isPlaceholderData).toBe(false));
+    expect(result.current.data?.items).toEqual([activeTodo]);
   });
 
   it("keeps each filter's result in its own cache entry", async () => {

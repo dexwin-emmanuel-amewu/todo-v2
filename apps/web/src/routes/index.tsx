@@ -22,6 +22,7 @@ export function HomePage() {
   const state = getTodoListViewState({
     status: query.status,
     isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
     data: query.data,
     error: query.error,
     refetch: () => void query.refetch(),
