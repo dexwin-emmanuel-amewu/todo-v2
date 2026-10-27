@@ -443,7 +443,6 @@ function TodoItems({
   onClearSearch?: () => void;
 }) {
   if (items.length === 0) {
-    // The empty result belongs to the previous filter, so say nothing until the new one arrives.
     if (locked) return null;
 
     return (
@@ -622,6 +621,16 @@ export function TodoList({
       { state: P.union("ready", "refreshing", "loading_query", "refresh_failure") },
       (listState) => (
         <div className="space-y-3">
+          {listState.state === "refreshing" && (
+            <p role="status" aria-live="polite" className="text-sm text-slate-500">
+              Refreshing
+            </p>
+          )}
+          {listState.state === "loading_query" && (
+            <p role="status" aria-live="polite" className="text-sm text-slate-500">
+              Updating results
+            </p>
+          )}
           {listState.state !== "loading_query" && totalItems !== undefined && totalItems > 0 && (
             <p className="text-sm text-slate-600">{countLabel(filter, totalItems, search)}</p>
           )}
@@ -633,10 +642,10 @@ export function TodoList({
           )}
           <TodoItems
             items={listState.items}
-            busy={busy}
-            refreshing={listState.state === "refreshing" || listState.state === "loading_query"}
+            busy={listState.state === "refreshing" || listState.state === "loading_query" || busy}
             controls={completion}
             replacement={replacement}
+            refreshing={listState.state === "refreshing"}
             deletion={deletion}
             editingTodoId={activeEditingId}
             onStartEdit={onStartEdit}
