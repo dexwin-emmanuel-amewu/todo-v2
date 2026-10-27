@@ -21,6 +21,31 @@ describe("getTodoListSearch", () => {
   });
 });
 
+describe("getTodoListSearch search text", () => {
+  it("keeps a trimmed search", () => {
+    expect(getTodoListSearch({ search: "  milk " })).toEqual({ search: "milk" });
+  });
+
+  it("keeps the search together with the status", () => {
+    expect(getTodoListSearch({ status: "active", search: "milk" })).toEqual({
+      status: "active",
+      search: "milk",
+    });
+  });
+
+  it("drops a blank, missing, bad, or too long search", () => {
+    expect(getTodoListSearch({ search: "   " })).toEqual({});
+    expect(getTodoListSearch({})).toEqual({});
+    expect(getTodoListSearch({ search: ["a"] })).toEqual({});
+    expect(getTodoListSearch({ search: "a".repeat(101) })).toEqual({});
+  });
+
+  it("turns numbers and booleans parsed from the URL back into text", () => {
+    expect(getTodoListSearch({ search: 123 })).toEqual({ search: "123" });
+    expect(getTodoListSearch({ search: true })).toEqual({ search: "true" });
+  });
+});
+
 describe("getTodoStatusFilter", () => {
   it("reads all when no status is set", () => {
     expect(getTodoStatusFilter({})).toBe("all");
