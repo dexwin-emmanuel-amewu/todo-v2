@@ -64,6 +64,17 @@ const emptyMessages: Record<TodoStatusFilter, string> = {
   completed: "No completed todos.",
 };
 
+function emptyMessage(filter: TodoStatusFilter, search?: string): string {
+  if (!search) return emptyMessages[filter];
+  return filter === "all" ? `No todos match "${search}".` : `No ${filter} todos match "${search}".`;
+}
+
+function countLabel(filter: TodoStatusFilter, totalItems: number, search?: string): string {
+  const noun = totalItems === 1 ? "todo" : "todos";
+  const label = filter === "all" ? `${totalItems} ${noun}` : `${totalItems} ${filter} ${noun}`;
+  return search ? `${label} matching "${search}"` : label;
+}
+
 function completionErrorMessage(error: unknown): string {
   return match(error)
     .with(P.instanceOf(TodoApiError), ({ type, status }) =>
@@ -146,6 +157,7 @@ function TodoListItem({
   onDelete,
   registerEditButton,
   registerDeleteButton,
+  locked,
 }: {
   todo: Todo;
   controls: CompletionControls;
@@ -159,6 +171,7 @@ function TodoListItem({
   onDelete: (todo: Todo) => void;
   registerEditButton: (todoId: string, button: HTMLButtonElement | null) => void;
   registerDeleteButton: (todoId: string, button: HTMLButtonElement | null) => void;
+  locked: boolean;
 }) {
   const [draft, setDraft] = useState(todo.title);
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
@@ -166,11 +179,11 @@ function TodoListItem({
   const inputRef = useRef<HTMLInputElement>(null);
   const isPending = replacement.isPending && isEditing;
   const controlsAreDisabled =
+    locked ||
     controls.isPending ||
     replacement.isPending ||
     deletion.isPending ||
-    anotherRowIsEditing ||
-    locked;
+    anotherRowIsEditing;
   const hasError = controls.error != null && controls.errorTodoId === todo.id;
   const hasDeletionError = deletion.error != null && deletion.errorTodoId === todo.id;
 
@@ -412,6 +425,8 @@ function TodoItems({
   registerDeleteButton,
   emptyHeadingRef,
   emptyMessage,
+  onClearSearch,
+  locked,
 }: {
   items: Todo[];
   busy: boolean;
@@ -428,6 +443,8 @@ function TodoItems({
   registerDeleteButton: (todoId: string, button: HTMLButtonElement | null) => void;
   emptyHeadingRef: RefObject<HTMLHeadingElement | null>;
   emptyMessage: string;
+  onClearSearch?: () => void;
+  locked: boolean;
 }) {
   if (items.length === 0) {
     // The empty result belongs to the previous filter, so say nothing until the new one arrives.
@@ -438,6 +455,17 @@ function TodoItems({
         <h2 ref={emptyHeadingRef} tabIndex={-1} className={`${messageClassName} outline-none`}>
           {emptyMessage}
         </h2>
+        {onClearSearch && (
+          <div className="px-4 pb-4 text-center">
+            <button
+              type="button"
+              onClick={onClearSearch}
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+            >
+              Clear search
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -459,6 +487,7 @@ function TodoItems({
           onDelete={onDelete}
           registerEditButton={registerEditButton}
           registerDeleteButton={registerDeleteButton}
+          locked={locked}
         />
       ))}
     </ul>
@@ -492,9 +521,15 @@ export function TodoList({
   replacement = noReplacementControls,
   deletion = noDeletionControls,
   filter = "all",
+  search,
+  totalItems,
+  onClearSearch,
 }: {
   state: TodoListViewState;
   filter?: TodoStatusFilter;
+  search?: string;
+  onClearSearch?: () => void;
+  totalItems?: number;
   completion?: CompletionControls;
   replacement?: ReplacementControls;
   deletion?: DeletionControls;
@@ -589,9 +624,22 @@ export function TodoList({
       </div>
     ))
     .with(
-      { state: P.union("ready", "loading_filter", "refreshing", "refresh_failure") },
+      { state: P.union("ready", "refreshing", "loading_query", "refresh_failure") },
       (listState) => (
         <div className="space-y-3">
+          {listState.state === "refreshing" && (
+            <p role="status" aria-live="polite" className="text-sm text-slate-500">
+              Refreshing
+            </p>
+          )}
+          {listState.state === "loading_query" && (
+            <p role="status" aria-live="polite" className="text-sm text-slate-500">
+              Updating results
+            </p>
+          )}
+          {listState.state !== "loading_query" && totalItems !== undefined && totalItems > 0 && (
+            <p className="text-sm text-slate-600">{countLabel(filter, totalItems, search)}</p>
+          )}
           {listState.state === "refresh_failure" && (
             <div role="alert" className={alertClassName}>
               <p>Could not refresh your todos. Showing the last list that loaded.</p>
@@ -600,9 +648,7 @@ export function TodoList({
           )}
           <TodoItems
             items={listState.items}
-            busy={busy}
-            refreshing={listState.state === "refreshing" || listState.state === "loading_filter"}
-            locked={listState.state === "loading_filter"}
+            busy={listState.state === "refreshing" || listState.state === "loading_query" || busy}
             controls={completion}
             replacement={replacement}
             deletion={deletion}
@@ -613,7 +659,11 @@ export function TodoList({
             registerEditButton={registerEditButton}
             registerDeleteButton={registerDeleteButton}
             emptyHeadingRef={emptyHeadingRef}
-            emptyMessage={emptyMessages[filter]}
+            emptyMessage={emptyMessage(filter, search)}
+            locked={listState.state === "loading_query"}
+            onClearSearch={
+              search && listState.state !== "loading_query" ? onClearSearch : undefined
+            }
           />
         </div>
       ),
