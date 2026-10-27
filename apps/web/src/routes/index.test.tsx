@@ -362,7 +362,7 @@ describe("HomePage", () => {
       expect(requestedUrls()).toEqual(["/todos?status=active"]);
     });
 
-    it("loads the chosen filter without showing rows from the previous filter", async () => {
+    it("keeps the previous rows, disabled, and hides the count while the chosen filter loads", async () => {
       let resolveActive: (response: Response) => void = () => {};
       mockFetch()
         .mockResolvedValueOnce(jsonResponse(listBody(todos)))
@@ -374,16 +374,16 @@ describe("HomePage", () => {
       await userEvent.click(await filterLink("Active"));
 
       expect(router.state.location.href).toBe("/?status=active");
-      expect(await screen.findByRole("status")).toHaveTextContent(/loading todos/i);
-      expect(screen.queryByText("Water the plants")).not.toBeInTheDocument();
-      expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument();
+      expect(await screen.findByRole("status")).toHaveTextContent(/updating results/i);
+      expect(screen.getByText("Water the plants")).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: /Buy oat milk/ })).toBeDisabled();
       expect(screen.queryByText("2 todos")).not.toBeInTheDocument();
 
       resolveActive(jsonResponse(listBody([todos[0]])));
 
-      expect(await screen.findByText("Buy oat milk")).toBeInTheDocument();
+      expect(await screen.findByText("1 active todo")).toBeInTheDocument();
+      expect(screen.getByText("Buy oat milk")).toBeInTheDocument();
       expect(screen.queryByText("Water the plants")).not.toBeInTheDocument();
-      expect(screen.getByText("1 active todo")).toBeInTheDocument();
       expect(await filterLink("Active")).toHaveAttribute("aria-current", "page");
       expect(requestedUrls()).toEqual(["/todos", "/todos?status=active"]);
     });
@@ -419,6 +419,227 @@ describe("HomePage", () => {
 
       expect(await screen.findByRole("heading", { name: "No active todos." })).toBeInTheDocument();
       expect(requestedUrls()[2]).toBe("/todos?status=active");
+    });
+  });
+
+  describe("search", () => {
+    const searchBox = () => screen.getByRole("searchbox", { name: "Search todos" });
+
+    function respondBySearch(items: typeof todos) {
+      mockFetch().mockImplementation(async (url: string) => {
+        const params = new URL(url, "http://localhost").searchParams;
+        const search = params.get("search")?.toLowerCase();
+        const status = params.get("status");
+        const matches = items.filter(
+          (todo) =>
+            (!search || todo.title.toLowerCase().includes(search)) &&
+            (status === null || (status === "completed") === todo.completed),
+        );
+        return jsonResponse(listBody(matches));
+      });
+    }
+
+    it("shows an empty box and requests no search on the plain URL", async () => {
+      respondBySearch(todos);
+
+      renderPage("/");
+
+      await screen.findByText("2 todos");
+      expect(searchBox()).toHaveValue("");
+      expect(requestedUrls()).toEqual(["/todos"]);
+    });
+
+    it("fills the box from the URL and sends the search to the server", async () => {
+      respondBySearch(todos);
+
+      renderPage("/?search=milk");
+
+      expect(await screen.findByText('1 todo matching "milk"')).toBeInTheDocument();
+      expect(searchBox()).toHaveValue("milk");
+      expect(screen.queryByText("Water the plants")).not.toBeInTheDocument();
+      expect(requestedUrls()).toEqual(["/todos?search=milk"]);
+    });
+
+    it("commits a typed search to the URL and sends one request for it", async () => {
+      respondBySearch(todos);
+      const { router } = renderPage("/");
+      await screen.findByText("2 todos");
+
+      await userEvent.type(searchBox(), "milk");
+
+      expect(await screen.findByText('1 todo matching "milk"')).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/?search=milk");
+      expect(requestedUrls()).toEqual(["/todos", "/todos?search=milk"]);
+    });
+
+    it("combines the search with the status, and keeps the search when the status changes", async () => {
+      respondBySearch(todos);
+      const { router } = renderPage("/?search=a");
+      await screen.findByText('2 todos matching "a"');
+
+      await userEvent.click(await filterLink("Active"));
+
+      expect(await screen.findByText('1 active todo matching "a"')).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/?status=active&search=a");
+      expect(requestedUrls().at(-1)).toBe("/todos?status=active&search=a");
+    });
+
+    it("keeps the status when the search changes", async () => {
+      respondBySearch(todos);
+      const { router } = renderPage("/?status=completed");
+      await screen.findByText("1 completed todo");
+
+      await userEvent.type(searchBox(), "water{Enter}");
+
+      expect(await screen.findByText('1 completed todo matching "water"')).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/?status=completed&search=water");
+    });
+
+    it("drops a page param when the search changes", async () => {
+      respondBySearch(todos);
+      const { router } = renderPage("/?search=a&page=3");
+      await screen.findByText('2 todos matching "a"');
+      expect(router.state.location.href).toBe("/?search=a");
+
+      await userEvent.clear(searchBox());
+      await userEvent.type(searchBox(), "milk{Enter}");
+
+      await waitFor(() => expect(router.state.location.href).toBe("/?search=milk"));
+      expect(requestedUrls().every((url) => !url.includes("page"))).toBe(true);
+    });
+
+    it("shows a no results message with a way to clear the search", async () => {
+      respondBySearch(todos);
+      renderPage("/?search=zzz");
+
+      expect(
+        await screen.findByRole("heading", { name: 'No todos match "zzz".' }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    });
+
+    it("restores the unsearched list when the search is cleared", async () => {
+      respondBySearch(todos);
+      const { router } = renderPage("/?status=active&search=milk");
+      await screen.findByText('1 active todo matching "milk"');
+
+      await userEvent.click(screen.getByRole("button", { name: "Clear search" }));
+
+      expect(await screen.findByText("1 active todo")).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/?status=active");
+      expect(searchBox()).toHaveValue("");
+      expect(searchBox()).toHaveFocus();
+      expect(requestedUrls().at(-1)).toBe("/todos?status=active");
+    });
+
+    it("clears from the no results message and focuses the box", async () => {
+      respondBySearch(todos);
+      const { router } = renderPage("/?search=zzz");
+      await screen.findByRole("heading", { name: 'No todos match "zzz".' });
+
+      await userEvent.click(screen.getAllByRole("button", { name: /clear search/i })[1]);
+
+      expect(await screen.findByText("2 todos")).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/");
+      expect(searchBox()).toHaveFocus();
+    });
+
+    it("sends nothing for a blank search", async () => {
+      respondBySearch(todos);
+      const { router } = renderPage("/?search=%20%20");
+
+      await screen.findByText("2 todos");
+
+      expect(router.state.location.href).toBe("/");
+      expect(requestedUrls()).toEqual(["/todos"]);
+    });
+
+    it("drops a search over 100 characters from the URL and sends no request for it", async () => {
+      respondBySearch(todos);
+      const { router } = renderPage(`/?search=${"a".repeat(101)}`);
+
+      await screen.findByText("2 todos");
+
+      expect(router.state.location.href).toBe("/");
+      expect(requestedUrls()).toEqual(["/todos"]);
+    });
+
+    it("shows a message and sends no request for a typed search over 100 characters", async () => {
+      respondBySearch(todos);
+      renderPage("/");
+      await screen.findByText("2 todos");
+
+      await userEvent.click(searchBox());
+      await userEvent.paste("a".repeat(101));
+      await userEvent.keyboard("{Enter}");
+
+      expect(
+        await screen.findByText("Search must be 100 characters or fewer."),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Water the plants")).toBeInTheDocument();
+      expect(requestedUrls()).toEqual(["/todos"]);
+    });
+
+    it("keeps a numeric search as text without redirect loops", async () => {
+      respondBySearch(todos);
+      renderPage("/?search=123");
+
+      expect(await screen.findByText('No todos match "123".')).toBeInTheDocument();
+      expect(searchBox()).toHaveValue("123");
+      expect(requestedUrls()).toEqual(["/todos?search=123"]);
+    });
+
+    it("restores the earlier search and box text from history", async () => {
+      respondBySearch(todos);
+      const { history, router } = renderPage("/");
+      await screen.findByText("2 todos");
+      await userEvent.type(searchBox(), "milk{Enter}");
+      await screen.findByText('1 todo matching "milk"');
+      await userEvent.click(await filterLink("Active"));
+      await screen.findByText('1 active todo matching "milk"');
+
+      history.back();
+
+      await waitFor(() => expect(router.state.location.href).toBe("/?search=milk"));
+      expect(searchBox()).toHaveValue("milk");
+    });
+
+    it("shows the retry alert and keeps the typed text when the search request fails", async () => {
+      mockFetch()
+        .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+        .mockResolvedValueOnce(jsonResponse({ error: { type: "internal" } }, 500))
+        .mockResolvedValueOnce(jsonResponse(listBody([todos[0]])));
+      renderPage("/");
+      await screen.findByText("2 todos");
+
+      await userEvent.type(searchBox(), "milk{Enter}");
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Could not load your todos.");
+      expect(searchBox()).toHaveValue("milk");
+
+      await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+
+      expect(await screen.findByText('1 todo matching "milk"')).toBeInTheDocument();
+      expect(requestedUrls().at(-1)).toBe("/todos?search=milk");
+    });
+
+    it("removes a todo from a searched Active view once it is completed", async () => {
+      const completedTodo = { ...todos[0], completed: true };
+      mockFetch()
+        .mockResolvedValueOnce(jsonResponse(listBody([todos[0]])))
+        .mockResolvedValueOnce(jsonResponse(completedTodo))
+        .mockResolvedValueOnce(jsonResponse(listBody([])));
+      renderPage("/?status=active&search=milk");
+      await screen.findByText("Buy oat milk");
+
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" }),
+      );
+
+      expect(
+        await screen.findByRole("heading", { name: 'No active todos match "milk".' }),
+      ).toBeInTheDocument();
+      expect(requestedUrls()[2]).toBe("/todos?status=active&search=milk");
     });
   });
 });

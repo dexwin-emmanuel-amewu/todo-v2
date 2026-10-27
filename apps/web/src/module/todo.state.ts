@@ -5,6 +5,7 @@ import type { TodoApiError } from "../api/todo.api";
 export type TodoListQuerySnapshot = {
   status: "pending" | "error" | "success";
   isFetching: boolean;
+  isPlaceholderData: boolean;
   data: TodoListResponse | undefined;
   error: TodoApiError | null;
   refetch: () => void;
@@ -14,6 +15,7 @@ export type TodoListViewState =
   | { state: "initial_loading" }
   | { state: "initial_failure"; error: TodoApiError | null; retry: () => void }
   | { state: "ready"; items: Todo[] }
+  | { state: "loading_query"; items: Todo[] }
   | { state: "refreshing"; items: Todo[] }
   | { state: "refresh_failure"; items: Todo[]; error: TodoApiError | null; retry: () => void };
 
@@ -33,6 +35,10 @@ export function getTodoListViewState(snapshot: TodoListQuerySnapshot): TodoListV
         error,
         retry: refetch,
       }),
+    )
+    .with(
+      { status: "success", data: P.nonNullable, isPlaceholderData: true },
+      ({ data }): TodoListViewState => ({ state: "loading_query", items: data.items }),
     )
     .with(
       { status: "success", data: P.nonNullable, isFetching: true },

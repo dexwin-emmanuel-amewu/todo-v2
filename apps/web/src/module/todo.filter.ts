@@ -1,11 +1,22 @@
 import { type TodoStatusFilter, todoStatusFilterSchema } from "@todo/contracts";
 
-export type TodoListSearch = { status?: Exclude<TodoStatusFilter, "all"> };
+import { normalizeSearch, type TodoListSearch } from "./todo.search";
+
+export type { TodoListSearch };
+
+// The router parses URL values as JSON, so `?search=123` arrives as a number.
+function readSearchText(value: unknown): unknown {
+  return typeof value === "number" || typeof value === "boolean" ? String(value) : value;
+}
 
 export function getTodoListSearch(search: Record<string, unknown>): TodoListSearch {
-  const parsed = todoStatusFilterSchema.safeParse(search.status);
+  const parsedStatus = todoStatusFilterSchema.safeParse(search.status);
+  const parsedSearch = normalizeSearch(readSearchText(search.search));
 
-  return { status: parsed.success && parsed.data !== "all" ? parsed.data : undefined };
+  return {
+    status: parsedStatus.success && parsedStatus.data !== "all" ? parsedStatus.data : undefined,
+    search: parsedSearch.ok ? parsedSearch.value : undefined,
+  };
 }
 
 export function getTodoStatusFilter(search: TodoListSearch): TodoStatusFilter {

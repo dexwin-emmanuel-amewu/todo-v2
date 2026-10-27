@@ -63,7 +63,7 @@ describe("fetchTodoList", () => {
   it("sends no status param for the all filter", async () => {
     mockFetch().mockResolvedValue(jsonResponse(listBody));
 
-    await fetchTodoList("all");
+    await fetchTodoList({ status: "all" });
 
     expect(mockFetch().mock.calls[0][0]).toBe("/todos");
   });
@@ -71,15 +71,15 @@ describe("fetchTodoList", () => {
   it("sends the active and completed filters as a status param", async () => {
     mockFetch().mockImplementation(async () => jsonResponse(listBody));
 
-    await fetchTodoList("active");
-    await fetchTodoList("completed");
+    await fetchTodoList({ status: "active" });
+    await fetchTodoList({ status: "completed" });
 
     expect(mockFetch().mock.calls[0][0]).toBe("/todos?status=active");
     expect(mockFetch().mock.calls[1][0]).toBe("/todos?status=completed");
   });
 
   it("rejects a bad status with a request_validation error and makes no request", async () => {
-    await expect(fetchTodoList("done" as never)).rejects.toMatchObject({
+    await expect(fetchTodoList({ status: "done" as never })).rejects.toMatchObject({
       type: "request_validation",
     });
     expect(mockFetch()).not.toHaveBeenCalled();
@@ -90,7 +90,72 @@ describe("fetchTodoList", () => {
       jsonResponse({ error: { type: "validation", issues: ["Invalid option"] } }, 400),
     );
 
-    await expect(fetchTodoList("active")).rejects.toMatchObject({ type: "http", status: 400 });
+    await expect(fetchTodoList({ status: "active" })).rejects.toMatchObject({
+      type: "http",
+      status: 400,
+    });
+  });
+
+  it("sends the search as a search param", async () => {
+    mockFetch().mockResolvedValue(jsonResponse(listBody));
+
+    await fetchTodoList({ search: "milk" });
+
+    expect(mockFetch().mock.calls[0][0]).toBe("/todos?search=milk");
+  });
+
+  it("sends the status and the search together", async () => {
+    mockFetch().mockResolvedValue(jsonResponse(listBody));
+
+    await fetchTodoList({ status: "active", search: "milk" });
+
+    expect(mockFetch().mock.calls[0][0]).toBe("/todos?status=active&search=milk");
+  });
+
+  it("trims the search and sends nothing for a blank one", async () => {
+    mockFetch().mockImplementation(async () => jsonResponse(listBody));
+
+    await fetchTodoList({ search: "  milk  " });
+    await fetchTodoList({ search: "   " });
+
+    expect(mockFetch().mock.calls[0][0]).toBe("/todos?search=milk");
+    expect(mockFetch().mock.calls[1][0]).toBe("/todos");
+  });
+
+  it("encodes special characters in the search", async () => {
+    mockFetch().mockResolvedValue(jsonResponse(listBody));
+    const search = "a&b #1 100%";
+
+    await fetchTodoList({ search });
+
+    const url = new URL(mockFetch().mock.calls[0][0] as string, "http://localhost");
+    expect(url.searchParams.get("search")).toBe(search);
+    expect([...url.searchParams.keys()]).toEqual(["search"]);
+  });
+
+  it("rejects a search over 100 characters with a request_validation error and makes no request", async () => {
+    await expect(fetchTodoList({ search: "a".repeat(101) })).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    expect(mockFetch()).not.toHaveBeenCalled();
+  });
+
+  it("rejects with an http error when the API rejects the search", async () => {
+    mockFetch().mockResolvedValue(
+      jsonResponse({ error: { type: "validation", issues: ["Too big"] } }, 400),
+    );
+
+    await expect(fetchTodoList({ search: "milk" })).rejects.toMatchObject({
+      type: "http",
+      status: 400,
+    });
+  });
+
+  it("resolves an empty result for a search with no matches", async () => {
+    const empty = { items: [], page: 1, pageSize: 20, totalItems: 0, totalPages: 0 };
+    mockFetch().mockResolvedValue(jsonResponse(empty));
+
+    await expect(fetchTodoList({ search: "zzz" })).resolves.toEqual(empty);
   });
 
   it("resolves the parsed list on a 200", async () => {

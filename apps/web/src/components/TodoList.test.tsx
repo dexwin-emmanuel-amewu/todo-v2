@@ -508,4 +508,82 @@ describe("TodoList", () => {
       expect(screen.queryByText(/^0 /)).not.toBeInTheDocument();
     });
   });
+
+  describe("with a search", () => {
+    it("names the search in the count", () => {
+      const { rerender } = render(
+        <TodoList state={{ state: "ready", items }} search="milk" totalItems={2} />,
+      );
+      expect(screen.getByText('2 todos matching "milk"')).toBeInTheDocument();
+
+      rerender(
+        <TodoList
+          state={{ state: "ready", items: [items[0]] }}
+          filter="active"
+          search="milk"
+          totalItems={1}
+        />,
+      );
+      expect(screen.getByText('1 active todo matching "milk"')).toBeInTheDocument();
+    });
+
+    it("names the search in the empty message", () => {
+      const { rerender } = render(
+        <TodoList state={{ state: "ready", items: [] }} search="zzz" totalItems={0} />,
+      );
+      expect(screen.getByRole("heading", { name: 'No todos match "zzz".' })).toBeInTheDocument();
+
+      rerender(<TodoList state={{ state: "ready", items: [] }} filter="completed" search="zzz" />);
+      expect(
+        screen.getByRole("heading", { name: 'No completed todos match "zzz".' }),
+      ).toBeInTheDocument();
+    });
+
+    it("keeps the plain empty message without a search", () => {
+      render(<TodoList state={{ state: "ready", items: [] }} />);
+
+      expect(screen.getByRole("heading", { name: "No todos yet." })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Clear search" })).not.toBeInTheDocument();
+    });
+
+    it("offers a Clear search button in the empty message", async () => {
+      const onClearSearch = vi.fn();
+      render(
+        <TodoList
+          state={{ state: "ready", items: [] }}
+          search="zzz"
+          onClearSearch={onClearSearch}
+        />,
+      );
+
+      await userEvent.click(screen.getByRole("button", { name: "Clear search" }));
+
+      expect(onClearSearch).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the old rows, disables their actions, hides the count, and says it is updating", () => {
+      render(<TodoList state={{ state: "loading_query", items }} search="milk" totalItems={2} />);
+
+      expect(screen.getByRole("status")).toHaveTextContent("Updating results");
+      expect(screen.getByText("Buy oat milk")).toBeInTheDocument();
+      expect(screen.getByRole("list")).toHaveAttribute("aria-busy", "true");
+      for (const checkbox of screen.getAllByRole("checkbox")) expect(checkbox).toBeDisabled();
+      expect(screen.queryByText(/matching/)).not.toBeInTheDocument();
+    });
+
+    it("keeps the old list and the retry alert when a refresh fails", async () => {
+      const retry = vi.fn();
+      render(
+        <TodoList
+          state={{ state: "refresh_failure", items, error, retry }}
+          search="milk"
+          totalItems={3}
+        />,
+      );
+
+      expect(screen.getByRole("alert")).toHaveTextContent(/could not refresh/i);
+      await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+      expect(retry).toHaveBeenCalledTimes(1);
+    });
+  });
 });

@@ -11,6 +11,8 @@ import {
   todoStatusFilterSchema,
 } from "@todo/contracts";
 
+import { normalizeSearch } from "../module/todo.search";
+
 export const TODO_API_BASE_URL = import.meta.env.VITE_API_URL ?? "";
 
 export type TodoApiErrorType = "network" | "http" | "request_validation" | "response_validation";
@@ -33,17 +35,28 @@ export class TodoApiError extends Error {
   }
 }
 
-export async function fetchTodoList(status: TodoStatusFilter = "all"): Promise<TodoListResponse> {
-  const parsedStatus = todoStatusFilterSchema.safeParse(status);
+export type TodoListParams = { status?: TodoStatusFilter; search?: string };
 
-  if (!parsedStatus.success) {
-    throw new TodoApiError("request_validation", "The todo list filter was invalid.", {
-      issues: parsedStatus.error.issues.map((issue) => issue.message),
+export async function fetchTodoList({
+  status = "all",
+  search,
+}: TodoListParams = {}): Promise<TodoListResponse> {
+  const parsedStatus = todoStatusFilterSchema.safeParse(status);
+  const parsedSearch = normalizeSearch(search ?? "");
+
+  if (!parsedStatus.success || !parsedSearch.ok) {
+    throw new TodoApiError("request_validation", "The todo list request was invalid.", {
+      issues: [
+        ...(parsedStatus.success ? [] : parsedStatus.error.issues.map((issue) => issue.message)),
+        ...(parsedSearch.ok ? [] : ["The search must be 100 characters or fewer."]),
+      ],
     });
   }
 
-  const query =
-    parsedStatus.data === "all" ? "" : `?${new URLSearchParams({ status: parsedStatus.data })}`;
+  const params = new URLSearchParams();
+  if (parsedStatus.data !== "all") params.set("status", parsedStatus.data);
+  if (parsedSearch.value) params.set("search", parsedSearch.value);
+  const query = params.size > 0 ? `?${params}` : "";
 
   let response: Response;
 

@@ -90,4 +90,31 @@ describe("TodoFilters", () => {
     expect(links.active).toHaveAttribute("aria-current", "page");
     expect(links.all).not.toHaveAttribute("aria-current");
   });
+
+  it("keeps the search in every filter link", async () => {
+    renderFilters("/?search=milk");
+
+    const links = await filterLinks();
+
+    expect(links.all).toHaveAttribute("href", "/?search=milk");
+    expect(links.active).toHaveAttribute("href", "/?status=active&search=milk");
+    expect(links.completed).toHaveAttribute("href", "/?status=completed&search=milk");
+  });
+
+  it("drops a page param from the filter links", async () => {
+    renderFilters("/?search=milk&page=3");
+
+    const links = await filterLinks();
+
+    expect(links.active.getAttribute("href")).not.toContain("page");
+  });
+
+  it("keeps the selection on the filter that matches the status when a search is set", async () => {
+    renderFilters("/?status=active&search=milk");
+
+    const links = await filterLinks();
+
+    expect(links.active).toHaveAttribute("aria-current", "page");
+    expect(links.all).not.toHaveAttribute("aria-current");
+  });
 });

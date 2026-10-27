@@ -1,9 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { TodoStatusFilter } from "@todo/contracts";
 import { renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { TodoListParams } from "../api/todo.api";
 import { getTodoListQueryKey, todoListQueryKey, useTodoListQuery } from "./useTodoListQuery";
 
 const activeTodo = {
@@ -41,11 +41,15 @@ function mockFetch() {
 
 function respondByStatus() {
   mockFetch().mockImplementation(async (url: string) => {
-    const items = url.endsWith("status=active")
+    const search = new URL(url, "http://localhost").searchParams.get("search");
+    const all = url.includes("status=active")
       ? [activeTodo]
-      : url.endsWith("status=completed")
+      : url.includes("status=completed")
         ? [completedTodo]
         : [activeTodo, completedTodo];
+    const items = search
+      ? all.filter((todo) => todo.title.toLowerCase().includes(search.toLowerCase()))
+      : all;
     return new Response(JSON.stringify(listBody(items)), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -53,13 +57,13 @@ function respondByStatus() {
   });
 }
 
-function renderListHook(initialStatus: TodoStatusFilter) {
+function renderListHook(initialParams: TodoListParams) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) =>
     createElement(QueryClientProvider, { client: queryClient }, children);
-  const hook = renderHook(({ status }) => useTodoListQuery(status), {
+  const hook = renderHook(({ params }) => useTodoListQuery(params), {
     wrapper,
-    initialProps: { status: initialStatus },
+    initialProps: { params: initialParams },
   });
   return { ...hook, queryClient };
 }
@@ -72,52 +76,121 @@ describe("todoListQueryKey", () => {
 
 describe("getTodoListQueryKey", () => {
   it("gives each filter its own key under the list prefix", () => {
-    expect(getTodoListQueryKey("all")).toEqual(["todos", "list", { status: "all" }]);
-    expect(getTodoListQueryKey("active")).toEqual(["todos", "list", { status: "active" }]);
-    expect(getTodoListQueryKey("completed")).toEqual(["todos", "list", { status: "completed" }]);
-    expect(getTodoListQueryKey("active").slice(0, 2)).toEqual([...todoListQueryKey]);
+    expect(getTodoListQueryKey({ status: "all" })).toEqual(["todos", "list", { status: "all" }]);
+    expect(getTodoListQueryKey({ status: "active" })).toEqual([
+      "todos",
+      "list",
+      { status: "active" },
+    ]);
+    expect(getTodoListQueryKey({ status: "completed" })).toEqual([
+      "todos",
+      "list",
+      { status: "completed" },
+    ]);
+    expect(getTodoListQueryKey({ status: "active" }).slice(0, 2)).toEqual([...todoListQueryKey]);
+  });
+});
+
+describe("getTodoListQueryKey with a search", () => {
+  it("adds the search to the key under the list prefix", () => {
+    const key = getTodoListQueryKey({ status: "active", search: "milk" });
+
+    expect(key).toEqual(["todos", "list", { status: "active", search: "milk" }]);
+    expect(key.slice(0, 2)).toEqual([...todoListQueryKey]);
+  });
+
+  it("gives different keys to searches that differ only in case", () => {
+    expect(getTodoListQueryKey({ search: "Milk" })).not.toEqual(
+      getTodoListQueryKey({ search: "milk" }),
+    );
   });
 });
 
 describe("useTodoListQuery", () => {
   it("requests the selected filter from the server", async () => {
     respondByStatus();
-    const { result } = renderListHook("completed");
+    const { result } = renderListHook({ status: "completed" });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mockFetch().mock.calls[0][0]).toBe("/todos?status=completed");
     expect(result.current.data?.items).toEqual([completedTodo]);
   });
 
-  it("does not show another filter's data while a new filter loads", async () => {
+  it("keeps the previous data as placeholder while a new filter loads", async () => {
     respondByStatus();
-    const { result, rerender } = renderListHook("all");
+    const { result, rerender } = renderListHook({ status: "all" });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    rerender({ status: "active" });
+    rerender({ params: { status: "active" } });
 
-    expect(result.current.status).toBe("pending");
+    expect(result.current.isPlaceholderData).toBe(true);
+    expect(result.current.data?.items).toEqual([activeTodo, completedTodo]);
+    await waitFor(() => expect(result.current.isPlaceholderData).toBe(false));
+    expect(result.current.data?.items).toEqual([activeTodo]);
+  });
+
+  it("requests the status and the search together", async () => {
+    respondByStatus();
+    const { result } = renderListHook({ status: "active", search: "milk" });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockFetch().mock.calls[0][0]).toBe("/todos?status=active&search=milk");
+    expect(result.current.data?.items).toEqual([activeTodo]);
+  });
+
+  it("keeps the previous data while a new search loads", async () => {
+    respondByStatus();
+    const { result, rerender } = renderListHook({});
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    rerender({ params: { search: "plants" } });
+
+    expect(result.current.isPlaceholderData).toBe(true);
+    await waitFor(() => expect(result.current.data?.items).toEqual([completedTodo]));
+    expect(result.current.isPlaceholderData).toBe(false);
+  });
+
+  it("does not show old data when the new query fails", async () => {
+    respondByStatus();
+    const { result, rerender } = renderListHook({});
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    mockFetch().mockResolvedValue(new Response("{}", { status: 500 }));
+
+    rerender({ params: { search: "boom" } });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
     expect(result.current.data).toBeUndefined();
-    await waitFor(() => expect(result.current.data?.items).toEqual([activeTodo]));
+  });
+
+  it("goes back to the unsearched list when the search is cleared", async () => {
+    respondByStatus();
+    const { result, rerender } = renderListHook({ search: "plants" });
+    await waitFor(() => expect(result.current.data?.items).toEqual([completedTodo]));
+
+    rerender({ params: {} });
+
+    await waitFor(() => expect(result.current.data?.items).toEqual([activeTodo, completedTodo]));
   });
 
   it("keeps each filter's result in its own cache entry", async () => {
     respondByStatus();
-    const { result, rerender, queryClient } = renderListHook("active");
+    const { result, rerender, queryClient } = renderListHook({ status: "active" });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    rerender({ status: "completed" });
+    rerender({ params: { status: "completed" } });
     await waitFor(() => expect(result.current.data?.items).toEqual([completedTodo]));
 
-    expect(queryClient.getQueryData(getTodoListQueryKey("active"))).toEqual(listBody([activeTodo]));
-    expect(queryClient.getQueryData(getTodoListQueryKey("completed"))).toEqual(
+    expect(queryClient.getQueryData(getTodoListQueryKey({ status: "active" }))).toEqual(
+      listBody([activeTodo]),
+    );
+    expect(queryClient.getQueryData(getTodoListQueryKey({ status: "completed" }))).toEqual(
       listBody([completedTodo]),
     );
   });
 
   it("refetches the filtered list when the list prefix is invalidated", async () => {
     respondByStatus();
-    const { result, queryClient } = renderListHook("active");
+    const { result, queryClient } = renderListHook({ status: "active" });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     await queryClient.invalidateQueries({ queryKey: todoListQueryKey });
