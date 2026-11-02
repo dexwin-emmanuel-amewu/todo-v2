@@ -133,6 +133,48 @@ describe("fetchTodoList", () => {
     expect([...url.searchParams.keys()]).toEqual(["search"]);
   });
 
+  it("sends the page when it is not the first", async () => {
+    mockFetch().mockResolvedValue(jsonResponse(listBody));
+
+    await fetchTodoList({ page: 2 });
+
+    expect(mockFetch().mock.calls[0][0]).toBe("/todos?page=2");
+  });
+
+  it("sends the status, search, page, and page size together", async () => {
+    mockFetch().mockResolvedValue(jsonResponse(listBody));
+
+    await fetchTodoList({ status: "active", search: "milk", page: 2, pageSize: 10 });
+
+    expect(mockFetch().mock.calls[0][0]).toBe(
+      "/todos?status=active&search=milk&page=2&pageSize=10",
+    );
+  });
+
+  it("sends nothing for page 1 and page size 20", async () => {
+    mockFetch().mockResolvedValue(jsonResponse(listBody));
+
+    await fetchTodoList({ page: 1, pageSize: 20 });
+
+    expect(mockFetch().mock.calls[0][0]).toBe("/todos");
+  });
+
+  it.each([{ page: 0 }, { page: 1.5 }, { pageSize: 0 }, { pageSize: 101 }])(
+    "rejects %o with a request_validation error and makes no request",
+    async (params) => {
+      await expect(fetchTodoList(params)).rejects.toMatchObject({ type: "request_validation" });
+      expect(mockFetch()).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects with an http error when the API rejects the page", async () => {
+    mockFetch().mockResolvedValue(
+      jsonResponse({ error: { type: "validation", issues: ["Too small"] } }, 400),
+    );
+
+    await expect(fetchTodoList({ page: 2 })).rejects.toMatchObject({ type: "http", status: 400 });
+  });
+
   it("rejects a search over 100 characters with a request_validation error and makes no request", async () => {
     await expect(fetchTodoList({ search: "a".repeat(101) })).rejects.toMatchObject({
       type: "request_validation",

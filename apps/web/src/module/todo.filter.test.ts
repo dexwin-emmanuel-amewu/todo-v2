@@ -46,6 +46,22 @@ describe("getTodoListSearch search text", () => {
   });
 });
 
+describe("getTodoListSearch page and page size", () => {
+  it("keeps a valid page and page size", () => {
+    expect(getTodoListSearch({ page: 2, pageSize: 10 })).toEqual({ page: 2, pageSize: 10 });
+    expect(getTodoListSearch({ page: "02" })).toEqual({ page: 2 });
+  });
+
+  it("drops the defaults and bad values", () => {
+    expect(getTodoListSearch({ page: 1, pageSize: 20 })).toEqual({});
+    expect(getTodoListSearch({ page: 0 })).toEqual({});
+    expect(getTodoListSearch({ page: "abc" })).toEqual({});
+    expect(getTodoListSearch({ page: true })).toEqual({});
+    expect(getTodoListSearch({ pageSize: 7 })).toEqual({});
+    expect(getTodoListSearch({ pageSize: 500 })).toEqual({});
+  });
+});
+
 describe("getTodoStatusFilter", () => {
   it("reads all when no status is set", () => {
     expect(getTodoStatusFilter({})).toBe("all");

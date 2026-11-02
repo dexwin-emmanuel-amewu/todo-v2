@@ -15,7 +15,7 @@ const selectedClassName = "border-slate-900 bg-slate-900 font-semibold text-whit
 const unselectedClassName = "border-slate-300 bg-white text-slate-700 hover:bg-slate-50";
 
 export function TodoFilters() {
-  const { search } = getTodoListSearch(useSearch({ strict: false }));
+  const { search, pageSize } = getTodoListSearch(useSearch({ strict: false }));
 
   return (
     <nav aria-label="Filter todos" className="mb-3 flex gap-2">
@@ -23,7 +23,7 @@ export function TodoFilters() {
         <Link
           key={label}
           to="/"
-          search={getTodoListSearchLink({ status, search })}
+          search={getTodoListSearchLink({ status, search, pageSize })}
           activeOptions={{ exact: true }}
           className={linkClassName}
           activeProps={{ className: selectedClassName }}

@@ -355,7 +355,7 @@ describe("HomePage", () => {
     it("keeps a good status and drops unknown search params", async () => {
       respondByStatus(todos);
 
-      const { router } = renderPage("/?status=active&page=2");
+      const { router } = renderPage("/?status=active&unknown=2");
 
       expect(await screen.findByText("1 active todo")).toBeInTheDocument();
       expect(router.state.location.href).toBe("/?status=active");
@@ -495,19 +495,6 @@ describe("HomePage", () => {
       expect(router.state.location.href).toBe("/?status=completed&search=water");
     });
 
-    it("drops a page param when the search changes", async () => {
-      respondBySearch(todos);
-      const { router } = renderPage("/?search=a&page=3");
-      await screen.findByText('2 todos matching "a"');
-      expect(router.state.location.href).toBe("/?search=a");
-
-      await userEvent.clear(searchBox());
-      await userEvent.type(searchBox(), "milk{Enter}");
-
-      await waitFor(() => expect(router.state.location.href).toBe("/?search=milk"));
-      expect(requestedUrls().every((url) => !url.includes("page"))).toBe(true);
-    });
-
     it("shows a no results message with a way to clear the search", async () => {
       respondBySearch(todos);
       renderPage("/?search=zzz");
@@ -640,6 +627,260 @@ describe("HomePage", () => {
         await screen.findByRole("heading", { name: 'No active todos match "milk".' }),
       ).toBeInTheDocument();
       expect(requestedUrls()[2]).toBe("/todos?status=active&search=milk");
+    });
+  });
+
+  describe("pagination", () => {
+    // Task 1..total, in order. Even numbers are completed. The mock honours the page parameters.
+    function respondByPage(getTotal: () => number) {
+      const handler = async (url: string, init?: RequestInit) => {
+        if (init?.method === "DELETE") return new Response(null, { status: 204 });
+        const params = new URL(url, "http://localhost").searchParams;
+        const page = Number(params.get("page") ?? 1);
+        const pageSize = Number(params.get("pageSize") ?? 20);
+        const search = params.get("search")?.toLowerCase();
+        const status = params.get("status");
+        const all = Array.from({ length: getTotal() }, (_, index) => ({
+          id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+          title: `Task ${index + 1}`,
+          completed: (index + 1) % 2 === 0,
+          createdAt: "2026-09-30T10:00:00.000Z",
+        })).filter(
+          (todo) =>
+            (!search || todo.title.toLowerCase().includes(search)) &&
+            (status === null || (status === "completed") === todo.completed),
+        );
+        return jsonResponse({
+          items: all.slice((page - 1) * pageSize, page * pageSize),
+          page,
+          pageSize,
+          totalItems: all.length,
+          totalPages: all.length === 0 ? 0 : Math.ceil(all.length / pageSize),
+        });
+      };
+      mockFetch().mockImplementation(handler);
+      return handler;
+    }
+
+    const searchBox = () => screen.getByRole("searchbox", { name: "Search todos" });
+
+    const pagination = () => screen.findByRole("navigation", { name: "Pagination" });
+    const nextButton = () => screen.getByRole("button", { name: "Next page" });
+    const previousButton = () => screen.getByRole("button", { name: "Previous page" });
+    const pageSizeSelect = () => screen.getByRole("combobox", { name: "Todos per page" });
+
+    it("loads page 1 with no page parameters and shows the metadata", async () => {
+      respondByPage(() => 45);
+      const { router } = renderPage("/");
+
+      expect(await screen.findByText("Page 1 of 3. Showing 1 to 20 of 45")).toBeInTheDocument();
+      expect(requestedUrls()).toEqual(["/todos"]);
+      expect(router.state.location.href).toBe("/");
+      expect(previousButton()).toHaveAttribute("aria-disabled", "true");
+      expect(nextButton()).toHaveAttribute("aria-disabled", "false");
+    });
+
+    it("requests the page and page size from the URL", async () => {
+      respondByPage(() => 45);
+      renderPage("/?page=2&pageSize=10");
+
+      expect(await screen.findByText("Page 2 of 5. Showing 11 to 20 of 45")).toBeInTheDocument();
+      expect(requestedUrls()).toEqual(["/todos?page=2&pageSize=10"]);
+      expect(pageSizeSelect()).toHaveValue("10");
+    });
+
+    it("moves to the next page and back, and keeps focus on the button", async () => {
+      respondByPage(() => 45);
+      const { router } = renderPage("/");
+      await pagination();
+
+      await userEvent.click(nextButton());
+
+      expect(await screen.findByText("Page 2 of 3. Showing 21 to 40 of 45")).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/?page=2");
+      expect(screen.getByText("Task 21")).toBeInTheDocument();
+      expect(nextButton()).toHaveFocus();
+
+      await userEvent.click(previousButton());
+
+      expect(await screen.findByText("Page 1 of 3. Showing 1 to 20 of 45")).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/");
+    });
+
+    it("disables Next on the last page", async () => {
+      respondByPage(() => 45);
+      renderPage("/?page=3");
+
+      expect(await screen.findByText("Page 3 of 3. Showing 41 to 45 of 45")).toBeInTheDocument();
+      expect(nextButton()).toHaveAttribute("aria-disabled", "true");
+    });
+
+    it("restores the earlier page with browser back", async () => {
+      respondByPage(() => 45);
+      const { router } = renderPage("/");
+      await pagination();
+      await userEvent.click(nextButton());
+      await screen.findByText("Page 2 of 3. Showing 21 to 40 of 45");
+
+      router.history.back();
+
+      expect(await screen.findByText("Page 1 of 3. Showing 1 to 20 of 45")).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/");
+    });
+
+    it("changes the page size, drops the page, and keeps the status and search", async () => {
+      respondByPage(() => 45);
+      const { router } = renderPage("/?search=task&page=2");
+      await screen.findByText("Page 2 of 3. Showing 21 to 40 of 45");
+
+      await userEvent.selectOptions(pageSizeSelect(), "10");
+
+      expect(await screen.findByText("Page 1 of 5. Showing 1 to 10 of 45")).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/?search=task&pageSize=10");
+      expect(pageSizeSelect()).toHaveFocus();
+
+      await userEvent.selectOptions(pageSizeSelect(), "20");
+
+      await screen.findByText("Page 1 of 3. Showing 1 to 20 of 45");
+      expect(router.state.location.href).toBe("/?search=task");
+    });
+
+    it("resets to page 1 and keeps the page size when the status changes", async () => {
+      respondByPage(() => 45);
+      const { router } = renderPage("/?page=2&pageSize=10");
+      await screen.findByText("Page 2 of 5. Showing 11 to 20 of 45");
+
+      await userEvent.click(await filterLink("Active"));
+
+      expect(await screen.findByText("Page 1 of 3. Showing 1 to 10 of 23")).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/?status=active&pageSize=10");
+      expect(requestedUrls().at(-1)).toBe("/todos?status=active&pageSize=10");
+    });
+
+    it("resets to page 1 and keeps the page size when the search changes", async () => {
+      respondByPage(() => 45);
+      const { router } = renderPage("/?page=2&pageSize=10");
+      await screen.findByText("Page 2 of 5. Showing 11 to 20 of 45");
+
+      await userEvent.type(searchBox(), "task 1{Enter}");
+
+      await waitFor(() => expect(router.state.location.href).toBe("/?search=task+1&pageSize=10"));
+      expect(requestedUrls().at(-1)).toBe("/todos?search=task+1&pageSize=10");
+    });
+
+    it("drops bad page and page size values and replaces the URL", async () => {
+      respondByPage(() => 45);
+      const { router } = renderPage("/?page=abc&pageSize=7");
+
+      await screen.findByText("Page 1 of 3. Showing 1 to 20 of 45");
+
+      expect(router.state.location.href).toBe("/");
+      expect(requestedUrls()).toEqual(["/todos"]);
+    });
+
+    it("drops the default page and page size", async () => {
+      respondByPage(() => 45);
+      const { router } = renderPage("/?page=1&pageSize=20");
+
+      await screen.findByText("Page 1 of 3. Showing 1 to 20 of 45");
+
+      expect(router.state.location.href).toBe("/");
+    });
+
+    it("rewrites a zero padded page without looping", async () => {
+      respondByPage(() => 45);
+      const { router } = renderPage("/?page=02");
+
+      expect(await screen.findByText("Page 2 of 3. Showing 21 to 40 of 45")).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/?page=2");
+    });
+
+    it("moves a page past the end to the last page without showing an empty message", async () => {
+      respondByPage(() => 45);
+      const { router } = renderPage("/?page=9");
+
+      expect(await screen.findByText("Page 3 of 3. Showing 41 to 45 of 45")).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/?page=3");
+      expect(screen.queryByText(/no todos/i)).not.toBeInTheDocument();
+      expect(requestedUrls()).toEqual(["/todos?page=9", "/todos?page=3"]);
+    });
+
+    it("does not return to the missing page with browser back", async () => {
+      respondByPage(() => 45);
+      const { router } = renderPage("/?page=9");
+      await screen.findByText("Page 3 of 3. Showing 41 to 45 of 45");
+
+      expect(router.history.length).toBe(1);
+    });
+
+    it("moves an empty list with a page to page 1 and shows the empty message", async () => {
+      respondByPage(() => 0);
+      const { router } = renderPage("/?page=3");
+
+      expect(await screen.findByText(/no todos yet/i)).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/");
+      expect(screen.queryByRole("navigation", { name: "Pagination" })).not.toBeInTheDocument();
+    });
+
+    it("hides the bar for 10 todos or fewer", async () => {
+      respondByPage(() => 10);
+      renderPage("/");
+
+      expect(await screen.findByText("10 todos")).toBeInTheDocument();
+      expect(screen.queryByRole("navigation", { name: "Pagination" })).not.toBeInTheDocument();
+    });
+
+    it("keeps the old page, disables both buttons, and hides the range while a page loads", async () => {
+      let resolvePage: (response: Response) => void = () => {};
+      const respond = respondByPage(() => 45);
+      mockFetch()
+        .mockImplementationOnce(respond)
+        .mockImplementationOnce(() => new Promise<Response>((resolve) => (resolvePage = resolve)));
+      renderPage("/");
+      await screen.findByText("Page 1 of 3. Showing 1 to 20 of 45");
+
+      await userEvent.click(nextButton());
+
+      expect(await screen.findByText("Updating results")).toBeInTheDocument();
+      expect(screen.getByText("Task 1")).toBeInTheDocument();
+      expect(previousButton()).toHaveAttribute("aria-disabled", "true");
+      expect(nextButton()).toHaveAttribute("aria-disabled", "true");
+      expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
+
+      resolvePage(await respond("/todos?page=2"));
+
+      expect(await screen.findByText("Page 2 of 3. Showing 21 to 40 of 45")).toBeInTheDocument();
+    });
+
+    it("moves to the new last page when the only todo on the last page is deleted", async () => {
+      let total = 21;
+      respondByPage(() => total);
+      const { router } = renderPage("/?page=2");
+      await screen.findByText("Page 2 of 2. Showing 21 to 21 of 21");
+
+      total = 20;
+      await userEvent.click(screen.getByRole("button", { name: "Delete Task 21" }));
+
+      expect(await screen.findByText("Task 20")).toBeInTheDocument();
+      await waitFor(() => expect(router.state.location.href).toBe("/"));
+      expect(screen.queryByRole("navigation", { name: "Pagination" })).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("shows the alert with retry and no bar when the page fails to load", async () => {
+      mockFetch()
+        .mockResolvedValueOnce(jsonResponse({}, 500))
+        .mockResolvedValueOnce(jsonResponse(listBody(todos)));
+      renderPage("/?page=2");
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Could not load your todos.");
+      expect(screen.queryByRole("navigation", { name: "Pagination" })).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+
+      await waitFor(() =>
+        expect(requestedUrls().slice(0, 2)).toEqual(["/todos?page=2", "/todos?page=2"]),
+      );
     });
   });
 });

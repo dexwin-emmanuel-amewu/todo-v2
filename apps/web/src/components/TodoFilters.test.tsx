@@ -109,6 +109,15 @@ describe("TodoFilters", () => {
     expect(links.active.getAttribute("href")).not.toContain("page");
   });
 
+  it("keeps the page size in every filter link", async () => {
+    renderFilters("/?pageSize=10&page=2");
+
+    const links = await filterLinks();
+
+    expect(links.all).toHaveAttribute("href", "/?pageSize=10");
+    expect(links.active).toHaveAttribute("href", "/?status=active&pageSize=10");
+  });
+
   it("keeps the selection on the filter that matches the status when a search is set", async () => {
     renderFilters("/?status=active&search=milk");
 

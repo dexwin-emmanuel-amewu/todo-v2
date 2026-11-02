@@ -6,11 +6,14 @@ import {
   patchTodoSchema,
   replaceTodoSchema,
   todoListResponseSchema,
+  todoPageQuerySchema,
+  todoPageSizeQuerySchema,
   todoIdParamSchema,
   todoSchema,
   todoStatusFilterSchema,
 } from "@todo/contracts";
 
+import { DEFAULT_PAGE_SIZE } from "../module/todo.pagination";
 import { normalizeSearch } from "../module/todo.search";
 
 export const TODO_API_BASE_URL = import.meta.env.VITE_API_URL ?? "";
@@ -35,20 +38,33 @@ export class TodoApiError extends Error {
   }
 }
 
-export type TodoListParams = { status?: TodoStatusFilter; search?: string };
+export type TodoListParams = {
+  status?: TodoStatusFilter;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+};
 
 export async function fetchTodoList({
   status = "all",
   search,
+  page = 1,
+  pageSize = DEFAULT_PAGE_SIZE,
 }: TodoListParams = {}): Promise<TodoListResponse> {
   const parsedStatus = todoStatusFilterSchema.safeParse(status);
   const parsedSearch = normalizeSearch(search ?? "");
+  const parsedPage = todoPageQuerySchema.safeParse(page);
+  const parsedPageSize = todoPageSizeQuerySchema.safeParse(pageSize);
 
-  if (!parsedStatus.success || !parsedSearch.ok) {
+  if (!parsedStatus.success || !parsedSearch.ok || !parsedPage.success || !parsedPageSize.success) {
     throw new TodoApiError("request_validation", "The todo list request was invalid.", {
       issues: [
         ...(parsedStatus.success ? [] : parsedStatus.error.issues.map((issue) => issue.message)),
         ...(parsedSearch.ok ? [] : ["The search must be 100 characters or fewer."]),
+        ...(parsedPage.success ? [] : parsedPage.error.issues.map((issue) => issue.message)),
+        ...(parsedPageSize.success
+          ? []
+          : parsedPageSize.error.issues.map((issue) => issue.message)),
       ],
     });
   }
@@ -56,6 +72,10 @@ export async function fetchTodoList({
   const params = new URLSearchParams();
   if (parsedStatus.data !== "all") params.set("status", parsedStatus.data);
   if (parsedSearch.value) params.set("search", parsedSearch.value);
+  if (parsedPage.data !== 1) params.set("page", String(parsedPage.data));
+  if (parsedPageSize.data !== DEFAULT_PAGE_SIZE) {
+    params.set("pageSize", String(parsedPageSize.data));
+  }
   const query = params.size > 0 ? `?${params}` : "";
 
   let response: Response;
