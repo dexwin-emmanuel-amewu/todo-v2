@@ -76,18 +76,41 @@ describe("todoListQueryKey", () => {
 
 describe("getTodoListQueryKey", () => {
   it("gives each filter its own key under the list prefix", () => {
-    expect(getTodoListQueryKey({ status: "all" })).toEqual(["todos", "list", { status: "all" }]);
+    const base = { page: 1, pageSize: 20 };
+
+    expect(getTodoListQueryKey({ status: "all" })).toEqual([
+      "todos",
+      "list",
+      { status: "all", ...base },
+    ]);
     expect(getTodoListQueryKey({ status: "active" })).toEqual([
       "todos",
       "list",
-      { status: "active" },
+      { status: "active", ...base },
     ]);
     expect(getTodoListQueryKey({ status: "completed" })).toEqual([
       "todos",
       "list",
-      { status: "completed" },
+      { status: "completed", ...base },
     ]);
     expect(getTodoListQueryKey({ status: "active" }).slice(0, 2)).toEqual([...todoListQueryKey]);
+  });
+});
+
+describe("getTodoListQueryKey with a page", () => {
+  it("adds the page and page size to the key under the list prefix", () => {
+    const key = getTodoListQueryKey({ page: 2, pageSize: 10 });
+
+    expect(key).toEqual(["todos", "list", { status: "all", page: 2, pageSize: 10 }]);
+    expect(key.slice(0, 2)).toEqual([...todoListQueryKey]);
+  });
+
+  it("gives the default page and an empty query the same key", () => {
+    expect(getTodoListQueryKey({ page: 1, pageSize: 20 })).toEqual(getTodoListQueryKey({}));
+  });
+
+  it("gives each page its own key", () => {
+    expect(getTodoListQueryKey({ page: 2 })).not.toEqual(getTodoListQueryKey({ page: 3 }));
   });
 });
 
@@ -95,7 +118,11 @@ describe("getTodoListQueryKey with a search", () => {
   it("adds the search to the key under the list prefix", () => {
     const key = getTodoListQueryKey({ status: "active", search: "milk" });
 
-    expect(key).toEqual(["todos", "list", { status: "active", search: "milk" }]);
+    expect(key).toEqual([
+      "todos",
+      "list",
+      { status: "active", search: "milk", page: 1, pageSize: 20 },
+    ]);
     expect(key.slice(0, 2)).toEqual([...todoListQueryKey]);
   });
 
@@ -136,6 +163,25 @@ describe("useTodoListQuery", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mockFetch().mock.calls[0][0]).toBe("/todos?status=active&search=milk");
     expect(result.current.data?.items).toEqual([activeTodo]);
+  });
+
+  it("requests the page and page size from the server", async () => {
+    respondByStatus();
+    const { result } = renderListHook({ page: 2, pageSize: 10 });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockFetch().mock.calls[0][0]).toBe("/todos?page=2&pageSize=10");
+  });
+
+  it("keeps the previous data while a new page loads", async () => {
+    respondByStatus();
+    const { result, rerender } = renderListHook({});
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    rerender({ params: { page: 2 } });
+
+    expect(result.current.isPlaceholderData).toBe(true);
+    await waitFor(() => expect(result.current.isPlaceholderData).toBe(false));
   });
 
   it("keeps the previous data while a new search loads", async () => {

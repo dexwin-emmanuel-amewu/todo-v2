@@ -1,5 +1,6 @@
 import { type TodoStatusFilter, todoStatusFilterSchema } from "@todo/contracts";
 
+import { normalizePage, normalizePageSize } from "./todo.pagination";
 import { normalizeSearch, type TodoListSearch } from "./todo.search";
 
 export type { TodoListSearch };
@@ -12,10 +13,14 @@ function readSearchText(value: unknown): unknown {
 export function getTodoListSearch(search: Record<string, unknown>): TodoListSearch {
   const parsedStatus = todoStatusFilterSchema.safeParse(search.status);
   const parsedSearch = normalizeSearch(readSearchText(search.search));
+  const parsedPage = normalizePage(search.page);
+  const parsedPageSize = normalizePageSize(search.pageSize);
 
   return {
     status: parsedStatus.success && parsedStatus.data !== "all" ? parsedStatus.data : undefined,
     search: parsedSearch.ok ? parsedSearch.value : undefined,
+    page: parsedPage.ok ? parsedPage.value : undefined,
+    pageSize: parsedPageSize.ok ? parsedPageSize.value : undefined,
   };
 }
 
