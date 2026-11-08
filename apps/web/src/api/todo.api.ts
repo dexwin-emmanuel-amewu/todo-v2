@@ -5,6 +5,9 @@ import {
   createTodoSchema,
   patchTodoSchema,
   replaceTodoSchema,
+  type SetAllTodosCompletedResponse,
+  setAllTodosCompletedResponseSchema,
+  setAllTodosCompletedSchema,
   todoListResponseSchema,
   todoPageQuerySchema,
   todoPageSizeQuerySchema,
@@ -15,6 +18,7 @@ import {
 
 import { DEFAULT_PAGE_SIZE } from "../module/todo.pagination";
 import { normalizeSearch } from "../module/todo.search";
+import type { TodoSummary } from "../module/todo.toggleAll";
 
 export const TODO_API_BASE_URL = import.meta.env.VITE_API_URL ?? "";
 
@@ -106,6 +110,65 @@ export async function fetchTodoList({
   }
 
   const parsed = todoListResponseSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new TodoApiError("response_validation", "The API response did not match the contract.", {
+      issues: parsed.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  return parsed.data;
+}
+
+export async function fetchTodoSummary(): Promise<TodoSummary> {
+  const [all, active] = await Promise.all([
+    fetchTodoList({ pageSize: 1 }),
+    fetchTodoList({ status: "active", pageSize: 1 }),
+  ]);
+
+  return { totalCount: all.totalItems, activeCount: active.totalItems };
+}
+
+export async function setAllTodosCompleted(
+  completed: boolean,
+): Promise<SetAllTodosCompletedResponse> {
+  const parsedBody = setAllTodosCompletedSchema.safeParse({ completed });
+
+  if (!parsedBody.success) {
+    throw new TodoApiError("request_validation", "The toggle-all request was invalid.", {
+      issues: parsedBody.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(`${TODO_API_BASE_URL}/todos`, {
+      method: "PATCH",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(parsedBody.data),
+    });
+  } catch (cause) {
+    throw new TodoApiError("network", "Could not reach the API.", { cause });
+  }
+
+  if (!response.ok) {
+    throw new TodoApiError("http", `The API responded with ${response.status}.`, {
+      status: response.status,
+    });
+  }
+
+  let body: unknown;
+
+  try {
+    body = await response.json();
+  } catch (cause) {
+    throw new TodoApiError("response_validation", "The API response was not valid JSON.", {
+      cause,
+    });
+  }
+
+  const parsed = setAllTodosCompletedResponseSchema.safeParse(body);
 
   if (!parsed.success) {
     throw new TodoApiError("response_validation", "The API response did not match the contract.", {

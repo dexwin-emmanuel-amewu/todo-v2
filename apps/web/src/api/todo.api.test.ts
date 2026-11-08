@@ -4,8 +4,10 @@ import {
   createTodo,
   deleteTodo,
   fetchTodoList,
+  fetchTodoSummary,
   patchTodoCompletion,
   replaceTodo,
+  setAllTodosCompleted,
   TODO_API_BASE_URL,
   TodoApiError,
 } from "./todo.api";
@@ -458,5 +460,92 @@ describe("deleteTodo", () => {
 
     mockFetch().mockResolvedValueOnce(jsonResponse({}, 500));
     await expect(deleteTodo(todo.id)).rejects.toMatchObject({ type: "http", status: 500 });
+  });
+});
+
+describe("setAllTodosCompleted", () => {
+  it("sends one PATCH to the todos path with the completed body", async () => {
+    mockFetch().mockResolvedValue(jsonResponse({ updatedCount: 3 }));
+
+    await setAllTodosCompleted(true);
+
+    expect(mockFetch()).toHaveBeenCalledTimes(1);
+    const [url, init] = mockFetch().mock.calls[0];
+    expect(url).toBe("/todos");
+    expect(init).toMatchObject({
+      method: "PATCH",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ completed: true }),
+    });
+  });
+
+  it("resolves the parsed updated count", async () => {
+    mockFetch().mockResolvedValue(jsonResponse({ updatedCount: 3 }));
+
+    await expect(setAllTodosCompleted(false)).resolves.toEqual({ updatedCount: 3 });
+  });
+
+  it("rejects a non-boolean value with a request_validation error and makes no request", async () => {
+    await expect(setAllTodosCompleted("yes" as unknown as boolean)).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    expect(mockFetch()).not.toHaveBeenCalled();
+  });
+
+  it("rejects with an http error on a 400 or a 500", async () => {
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse({ error: { type: "validation", issues: [] } }, 400))
+      .mockResolvedValueOnce(jsonResponse({ error: { type: "internal" } }, 500));
+
+    await expect(setAllTodosCompleted(true)).rejects.toMatchObject({ type: "http", status: 400 });
+    await expect(setAllTodosCompleted(true)).rejects.toMatchObject({ type: "http", status: 500 });
+  });
+
+  it("rejects with a network error when fetch rejects", async () => {
+    mockFetch().mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const error = await setAllTodosCompleted(true).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(TodoApiError);
+    expect(error).toMatchObject({ type: "network" });
+  });
+
+  it("rejects with a response_validation error on invalid JSON or a bad body", async () => {
+    mockFetch()
+      .mockResolvedValueOnce(new Response("not json", { status: 200 }))
+      .mockResolvedValueOnce(jsonResponse({ updatedCount: -1 }));
+
+    await expect(setAllTodosCompleted(true)).rejects.toMatchObject({
+      type: "response_validation",
+    });
+    await expect(setAllTodosCompleted(true)).rejects.toMatchObject({
+      type: "response_validation",
+    });
+  });
+});
+
+describe("fetchTodoSummary", () => {
+  it("reads the total and active counts for the whole collection", async () => {
+    mockFetch().mockImplementation(async (url: string) =>
+      url.includes("status=active")
+        ? jsonResponse({ ...listBody, pageSize: 1, totalItems: 3, totalPages: 3 })
+        : jsonResponse({ ...listBody, pageSize: 1, totalItems: 12, totalPages: 12 }),
+    );
+
+    await expect(fetchTodoSummary()).resolves.toEqual({ totalCount: 12, activeCount: 3 });
+
+    const urls = mockFetch().mock.calls.map(([url]) => url as string);
+    expect(urls).toHaveLength(2);
+    expect(urls).toContain("/todos?pageSize=1");
+    expect(urls).toContain("/todos?status=active&pageSize=1");
+  });
+
+  it("rejects when either request fails", async () => {
+    mockFetch().mockImplementation(async (url: string) =>
+      url.includes("status=active")
+        ? jsonResponse({ error: { type: "internal" } }, 500)
+        : jsonResponse({ ...listBody, pageSize: 1 }),
+    );
+
+    await expect(fetchTodoSummary()).rejects.toMatchObject({ type: "http", status: 500 });
   });
 });

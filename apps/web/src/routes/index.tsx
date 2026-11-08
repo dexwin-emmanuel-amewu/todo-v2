@@ -5,15 +5,19 @@ import { TodoFilters } from "../components/TodoFilters";
 import { TodoList } from "../components/TodoList";
 import { TodoPagination } from "../components/TodoPagination";
 import { TodoSearch } from "../components/TodoSearch";
+import { TodoToggleAll } from "../components/TodoToggleAll";
 import { CreateTodoForm } from "../components/CreateTodoForm";
 import { usePatchTodoCompletionMutation } from "../hooks/usePatchTodoCompletionMutation";
 import { useDeleteTodoMutation } from "../hooks/useDeleteTodoMutation";
 import { useReplaceTodoMutation } from "../hooks/useReplaceTodoMutation";
+import { useSetAllTodosCompletedMutation } from "../hooks/useSetAllTodosCompletedMutation";
 import { useTodoListQuery } from "../hooks/useTodoListQuery";
+import { useTodoSummaryQuery } from "../hooks/useTodoSummaryQuery";
 import { getTodoStatusFilter } from "../module/todo.filter";
 import { DEFAULT_PAGE_SIZE, getPageRedirect } from "../module/todo.pagination";
 import { getTodoListPageLink, getTodoListSearchLink } from "../module/todo.search";
 import { getTodoListViewState, type TodoListViewState } from "../module/todo.state";
+import { getToggleAllState } from "../module/todo.toggleAll";
 
 const homeRoute = getRouteApi("/");
 
@@ -26,6 +30,7 @@ export function HomePage() {
   const page = urlSearch.page ?? 1;
   const pageSize = urlSearch.pageSize ?? DEFAULT_PAGE_SIZE;
   const query = useTodoListQuery({ status: filter, search, page, pageSize });
+  const summaryQuery = useTodoSummaryQuery();
 
   const commitSearch = (next: string | undefined) =>
     void navigate({
@@ -79,6 +84,7 @@ export function HomePage() {
   const completionMutation = usePatchTodoCompletionMutation();
   const replacementMutation = useReplaceTodoMutation();
   const deletionMutation = useDeleteTodoMutation();
+  const toggleAllMutation = useSetAllTodosCompletedMutation();
 
   const queryState = getTodoListViewState({
     status: query.status,
@@ -126,12 +132,47 @@ export function HomePage() {
     onDelete: (todoId: string) => deletionMutation.mutateAsync(todoId),
   };
 
+  const rowMutationPending =
+    completionMutation.isPending || replacementMutation.isPending || deletionMutation.isPending;
+  const toggleAll = summaryQuery.data ? getToggleAllState(summaryQuery.data) : undefined;
+  const toggleAllResult =
+    toggleAllMutation.isSuccess && toggleAllMutation.variables !== undefined
+      ? {
+          updatedCount: toggleAllMutation.data.updatedCount,
+          completed: toggleAllMutation.variables,
+        }
+      : null;
+
   return (
     <main className="mx-auto max-w-md p-8">
       <h1 className="mb-4 text-2xl font-semibold">Todo</h1>
       <CreateTodoForm />
       <TodoSearch value={search} onCommit={commitSearch} inputRef={searchInputRef} />
       <TodoFilters />
+      {summaryQuery.isSuccess && toggleAll?.state === "visible" && (
+        <TodoToggleAll
+          totalCount={toggleAll.totalCount}
+          checked={toggleAll.checked}
+          desired={toggleAll.desired}
+          scoped={filter !== "all" || Boolean(search)}
+          isPending={toggleAllMutation.isPending}
+          pendingCompleted={toggleAllMutation.variables}
+          locked={rowMutationPending}
+          result={toggleAllResult}
+          error={toggleAllMutation.error}
+          onToggle={(completed) => {
+            if (!toggleAllMutation.isPending && !rowMutationPending) {
+              toggleAllMutation.mutate(completed);
+            }
+          }}
+          onRetry={() => {
+            const completed = toggleAllMutation.variables;
+            if (completed !== undefined && !toggleAllMutation.isPending && !rowMutationPending) {
+              toggleAllMutation.mutate(completed);
+            }
+          }}
+        />
+      )}
       <TodoList
         state={state}
         filter={filter}
@@ -144,6 +185,7 @@ export function HomePage() {
         completion={completion}
         replacement={replacement}
         deletion={deletion}
+        bulkPending={toggleAllMutation.isPending}
       />
       {showPagination && query.data && (
         <TodoPagination

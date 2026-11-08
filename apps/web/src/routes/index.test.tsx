@@ -39,9 +39,25 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const originalFetch = globalThis.fetch;
+let apiFetch: ReturnType<typeof vi.fn>;
+let summaryFetch: ReturnType<typeof vi.fn>;
+
+// The toggle-all summary reads `GET /todos?pageSize=1` and `GET /todos?status=active&pageSize=1`.
+function isSummaryRequest(url: string) {
+  return /[?&]pageSize=1(&|$)/.test(url);
+}
+
+function summaryBody(totalItems: number) {
+  return { items: [], page: 1, pageSize: 1, totalItems, totalPages: totalItems };
+}
 
 beforeEach(() => {
-  globalThis.fetch = vi.fn();
+  apiFetch = vi.fn();
+  summaryFetch = vi.fn(async () => jsonResponse(summaryBody(0)));
+  globalThis.fetch = vi.fn((url: string, init?: RequestInit) => {
+    const target = (isSummaryRequest(url) ? summaryFetch : apiFetch) as unknown as typeof fetch;
+    return target(url, init);
+  }) as unknown as typeof fetch;
 });
 
 afterEach(() => {
@@ -50,7 +66,11 @@ afterEach(() => {
 });
 
 function mockFetch() {
-  return globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+  return apiFetch;
+}
+
+function summaryUrls() {
+  return summaryFetch.mock.calls.map(([url]) => url as string);
 }
 
 function renderPage(url = "/") {
@@ -881,6 +901,263 @@ describe("HomePage", () => {
       await waitFor(() =>
         expect(requestedUrls().slice(0, 2)).toEqual(["/todos?page=2", "/todos?page=2"]),
       );
+    });
+  });
+
+  describe("toggle all", () => {
+    type ServerTodo = (typeof todos)[number];
+
+    function makeTodos(count: number, isCompleted: (index: number) => boolean): ServerTodo[] {
+      return Array.from({ length: count }, (_, index) => ({
+        id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        title: `Todo number ${index + 1}`,
+        completed: isCompleted(index),
+        createdAt: new Date(Date.UTC(2026, 9, 1, 0, index)).toISOString(),
+      }));
+    }
+
+    // A small in-memory server for GET /todos and PATCH /todos.
+    function fakeServer(initial: ServerTodo[]) {
+      const state = { items: initial.map((todo) => ({ ...todo })) };
+      const patchBodies: unknown[] = [];
+      let patchOverride: (() => Promise<Response>) | undefined;
+
+      async function handle(url: string, init?: RequestInit): Promise<Response> {
+        if (init?.method === "PATCH" && url === "/todos") {
+          const body = JSON.parse(String(init.body)) as { completed: boolean };
+          patchBodies.push(body);
+          if (patchOverride) return patchOverride();
+          const changed = state.items.filter((todo) => todo.completed !== body.completed);
+          for (const todo of changed) todo.completed = body.completed;
+          return jsonResponse({ updatedCount: changed.length });
+        }
+
+        const params = new URL(url, "http://test").searchParams;
+        const status = params.get("status");
+        const page = Number(params.get("page") ?? 1);
+        const pageSize = Number(params.get("pageSize") ?? 20);
+        const matching = state.items.filter((todo) =>
+          status === "active" ? !todo.completed : status === "completed" ? todo.completed : true,
+        );
+        return jsonResponse({
+          items: matching.slice((page - 1) * pageSize, page * pageSize),
+          page,
+          pageSize,
+          totalItems: matching.length,
+          totalPages: matching.length === 0 ? 0 : Math.ceil(matching.length / pageSize),
+        });
+      }
+
+      mockFetch().mockImplementation(handle);
+      summaryFetch.mockImplementation(handle);
+
+      return {
+        state,
+        handle,
+        patchBodies,
+        failPatchWith(response: () => Promise<Response>) {
+          patchOverride = response;
+        },
+        restorePatch() {
+          patchOverride = undefined;
+        },
+      };
+    }
+
+    function listGetCount() {
+      return mockFetch().mock.calls.filter(([, init]) => (init?.method ?? "GET") === "GET").length;
+    }
+
+    it("reads the whole collection and marks every todo completed", async () => {
+      const server = fakeServer(makeTodos(12, (index) => index >= 3));
+
+      renderPage();
+
+      const checkbox = await screen.findByRole("checkbox", {
+        name: "Mark all 12 todos as completed",
+      });
+      expect(checkbox).not.toBeChecked();
+      expect(summaryUrls()).toEqual(
+        expect.arrayContaining(["/todos?pageSize=1", "/todos?status=active&pageSize=1"]),
+      );
+      expect(
+        screen.queryByText("Applies to all todos, not only this view."),
+      ).not.toBeInTheDocument();
+      const listGetsBefore = listGetCount();
+
+      await userEvent.click(checkbox);
+
+      expect(
+        await screen.findByRole("checkbox", { name: "Mark all 12 todos as active" }),
+      ).toBeChecked();
+      expect(server.patchBodies).toEqual([{ completed: true }]);
+      const patchCall = mockFetch().mock.calls.find(([, init]) => init?.method === "PATCH");
+      expect(patchCall?.[0]).toBe("/todos");
+      expect(patchCall?.[1]).toMatchObject({ body: JSON.stringify({ completed: true }) });
+      expect(await screen.findByText("Marked 3 todos as completed.")).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: "Mark all 12 todos as active" })).toHaveFocus();
+      expect(screen.getByRole("checkbox", { name: "Mark Todo number 1 as active" })).toBeChecked();
+      expect(listGetCount()).toBeGreaterThan(listGetsBefore);
+      expect(screen.getByText("12 todos")).toBeInTheDocument();
+    });
+
+    it("marks every todo active when every todo is completed", async () => {
+      const server = fakeServer(makeTodos(3, () => true));
+
+      renderPage();
+
+      const checkbox = await screen.findByRole("checkbox", { name: "Mark all 3 todos as active" });
+      expect(checkbox).toBeChecked();
+      await userEvent.click(checkbox);
+
+      expect(
+        await screen.findByRole("checkbox", { name: "Mark all 3 todos as completed" }),
+      ).not.toBeChecked();
+      expect(server.patchBodies).toEqual([{ completed: false }]);
+      expect(await screen.findByText("Marked 3 todos as active.")).toBeInTheDocument();
+    });
+
+    it("follows the whole collection on a filtered view and shows the scope note", async () => {
+      fakeServer(makeTodos(12, (index) => index >= 3));
+
+      renderPage("/?status=completed");
+
+      const checkbox = await screen.findByRole("checkbox", {
+        name: "Mark all 12 todos as completed",
+      });
+      expect(checkbox).not.toBeChecked();
+      expect(checkbox).toHaveAccessibleDescription("Applies to all todos, not only this view.");
+      expect(await screen.findByText("9 completed todos")).toBeInTheDocument();
+    });
+
+    it("follows the whole collection across pages", async () => {
+      fakeServer(makeTodos(25, (index) => index >= 20));
+
+      renderPage("/?page=2");
+
+      expect(await screen.findByText("Todo number 21")).toBeInTheDocument();
+      expect(
+        await screen.findByRole("checkbox", { name: "Mark all 25 todos as completed" }),
+      ).not.toBeChecked();
+    });
+
+    it("empties the Active view after marking every todo completed", async () => {
+      fakeServer(makeTodos(4, (index) => index === 0));
+
+      renderPage("/?status=active");
+
+      await screen.findByText("Todo number 2");
+      await userEvent.click(
+        await screen.findByRole("checkbox", { name: "Mark all 4 todos as completed" }),
+      );
+
+      expect(await screen.findByText("No active todos.")).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: "Mark all 4 todos as active" })).toBeChecked();
+    });
+
+    it("locks the control and the rows while the request is pending", async () => {
+      const server = fakeServer(makeTodos(3, () => false));
+      let release: () => void = () => {};
+      server.failPatchWith(
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve(jsonResponse({ updatedCount: 3 }));
+          }),
+      );
+
+      renderPage();
+      const checkbox = await screen.findByRole("checkbox", {
+        name: "Mark all 3 todos as completed",
+      });
+      await userEvent.dblClick(checkbox);
+
+      expect(await screen.findByText("Marking all todos as completed")).toBeInTheDocument();
+      expect(checkbox).toHaveAttribute("aria-disabled", "true");
+      expect(checkbox).not.toBeChecked();
+      expect(checkbox).toHaveFocus();
+      expect(
+        screen.getByRole("checkbox", { name: "Mark Todo number 1 as completed" }),
+      ).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Delete Todo number 1" })).toBeDisabled();
+      expect(server.patchBodies).toHaveLength(1);
+
+      release();
+      expect(await screen.findByText("Marked 3 todos as completed.")).toBeInTheDocument();
+      expect(server.patchBodies).toHaveLength(1);
+    });
+
+    it("shows an alert on failure, refreshes the list, and retries the same value", async () => {
+      const server = fakeServer(makeTodos(3, (index) => index === 0));
+      server.failPatchWith(async () => jsonResponse({ error: { type: "internal" } }, 500));
+
+      renderPage();
+      const checkbox = await screen.findByRole("checkbox", {
+        name: "Mark all 3 todos as completed",
+      });
+      const listGetsBefore = listGetCount();
+      await userEvent.click(checkbox);
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("The server could not update your todos. Try again.");
+      expect(checkbox).not.toBeChecked();
+      await waitFor(() => expect(listGetCount()).toBeGreaterThan(listGetsBefore));
+      expect(
+        screen.getByRole("checkbox", { name: "Mark Todo number 2 as completed" }),
+      ).toBeEnabled();
+
+      server.restorePatch();
+      await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+
+      expect(
+        await screen.findByRole("checkbox", { name: "Mark all 3 todos as active" }),
+      ).toBeChecked();
+      expect(server.patchBodies).toEqual([{ completed: true }, { completed: true }]);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("is hidden on an empty collection", async () => {
+      fakeServer([]);
+
+      renderPage();
+
+      expect(await screen.findByText(/no todos yet/i)).toBeInTheDocument();
+      await waitFor(() => expect(summaryFetch).toHaveBeenCalledTimes(2));
+      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    });
+
+    it("is hidden when the summary fails and the list still works", async () => {
+      fakeServer(makeTodos(3, () => false));
+      summaryFetch.mockResolvedValue(jsonResponse({ error: { type: "internal" } }, 500));
+
+      renderPage();
+
+      expect(await screen.findByText("Todo number 1")).toBeInTheDocument();
+      await waitFor(() => expect(summaryFetch).toHaveBeenCalled());
+      expect(screen.queryByRole("checkbox", { name: /^Mark all/ })).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("checkbox", { name: "Mark Todo number 1 as completed" }),
+      ).toBeEnabled();
+    });
+
+    it("is locked while a row toggle is pending", async () => {
+      const server = fakeServer(makeTodos(3, () => false));
+      mockFetch().mockImplementation((url: string, init?: RequestInit) =>
+        init?.method === "PATCH" && url !== "/todos"
+          ? new Promise<Response>(() => {})
+          : server.handle(url, init),
+      );
+
+      renderPage();
+      const toggleAll = await screen.findByRole("checkbox", {
+        name: "Mark all 3 todos as completed",
+      });
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Mark Todo number 1 as completed" }),
+      );
+
+      await waitFor(() => expect(toggleAll).toHaveAttribute("aria-disabled", "true"));
+      await userEvent.click(toggleAll);
+      expect(server.patchBodies).toHaveLength(0);
     });
   });
 });
