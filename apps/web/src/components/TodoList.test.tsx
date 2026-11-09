@@ -1,7 +1,7 @@
 import type { Todo } from "@todo/contracts";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { createRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { TodoApiError } from "../api/todo.api";
@@ -238,6 +238,13 @@ describe("TodoList", () => {
     expect(screen.getByText(/no todos yet/i)).toBeInTheDocument();
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("uses a passed empty heading ref for the empty message", () => {
+    const emptyHeadingRef = createRef<HTMLHeadingElement>();
+    render(<TodoList state={{ state: "ready", items: [] }} emptyHeadingRef={emptyHeadingRef} />);
+
+    expect(emptyHeadingRef.current).toBe(screen.getByRole("heading", { name: "No todos yet." }));
   });
 
   it("shows an alert and a retry button on an initial failure, with no list", () => {

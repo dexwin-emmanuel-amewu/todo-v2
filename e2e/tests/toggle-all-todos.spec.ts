@@ -64,7 +64,9 @@ test("marks the whole collection from a filtered view, then marks it active agai
 
   const markCompleted = page.getByRole("checkbox", { name: "Mark all 25 todos as completed" });
   await expect(markCompleted).not.toBeChecked();
-  await expect(page.getByText("Applies to all todos, not only this view.")).toBeVisible();
+  await expect(markCompleted).toHaveAccessibleDescription(
+    "Applies to all todos, not only this view.",
+  );
   await expect(page.getByText("5 completed todos", { exact: true })).toBeVisible();
 
   await markCompleted.click();

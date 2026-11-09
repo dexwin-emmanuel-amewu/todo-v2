@@ -521,6 +521,7 @@ export function TodoList({
   totalItems,
   onClearSearch,
   bulkPending = false,
+  emptyHeadingRef: passedEmptyHeadingRef,
 }: {
   state: TodoListViewState;
   filter?: TodoStatusFilter;
@@ -531,6 +532,7 @@ export function TodoList({
   replacement?: ReplacementControls;
   deletion?: DeletionControls;
   bulkPending?: boolean;
+  emptyHeadingRef?: RefObject<HTMLHeadingElement | null>;
 }) {
   const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
   const editButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -542,7 +544,8 @@ export function TodoList({
     else editButtonRefs.current.delete(todoId);
   };
   const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement>());
-  const emptyHeadingRef = useRef<HTMLHeadingElement>(null);
+  const ownEmptyHeadingRef = useRef<HTMLHeadingElement>(null);
+  const emptyHeadingRef = passedEmptyHeadingRef ?? ownEmptyHeadingRef;
   const deletionInFlight = useRef(false);
   const pendingDeletionFocus = useRef<{ todoId: string; nextId?: string; prevId?: string } | null>(
     null,
@@ -595,7 +598,7 @@ export function TodoList({
     pendingDeletionFocus.current = null;
     if (target) target.focus();
     else if (items.length === 0) emptyHeadingRef.current?.focus();
-  }, [items, deletion.isPending]);
+  }, [items, deletion.isPending, emptyHeadingRef]);
 
   useLayoutEffect(() => {
     const previousTodoId = previousEditingTodoId.current;

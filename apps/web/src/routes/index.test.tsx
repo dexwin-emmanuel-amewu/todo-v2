@@ -109,6 +109,86 @@ async function filterLink(name: string) {
   return within(nav).getByRole("link", { name });
 }
 
+type ServerTodo = (typeof todos)[number];
+
+function makeTodos(count: number, isCompleted: (index: number) => boolean): ServerTodo[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    title: `Todo number ${index + 1}`,
+    completed: isCompleted(index),
+    createdAt: new Date(Date.UTC(2026, 9, 1, 0, index)).toISOString(),
+  }));
+}
+
+// A small in-memory server for GET /todos, PATCH /todos, and DELETE /todos?status=completed.
+function fakeServer(initial: ServerTodo[]) {
+  const state = { items: initial.map((todo) => ({ ...todo })) };
+  const patchBodies: unknown[] = [];
+  const deleteUrls: string[] = [];
+  let patchOverride: (() => Promise<Response>) | undefined;
+  let deleteOverride: (() => Promise<Response>) | undefined;
+
+  async function handle(url: string, init?: RequestInit): Promise<Response> {
+    if (init?.method === "PATCH" && url === "/todos") {
+      const body = JSON.parse(String(init.body)) as { completed: boolean };
+      patchBodies.push(body);
+      if (patchOverride) return patchOverride();
+      const changed = state.items.filter((todo) => todo.completed !== body.completed);
+      for (const todo of changed) todo.completed = body.completed;
+      return jsonResponse({ updatedCount: changed.length });
+    }
+
+    if (init?.method === "DELETE" && url.startsWith("/todos?")) {
+      deleteUrls.push(url);
+      if (deleteOverride) return deleteOverride();
+      const before = state.items.length;
+      state.items = state.items.filter((todo) => !todo.completed);
+      return jsonResponse({ deletedCount: before - state.items.length });
+    }
+
+    const params = new URL(url, "http://test").searchParams;
+    const status = params.get("status");
+    const page = Number(params.get("page") ?? 1);
+    const pageSize = Number(params.get("pageSize") ?? 20);
+    const matching = state.items.filter((todo) =>
+      status === "active" ? !todo.completed : status === "completed" ? todo.completed : true,
+    );
+    return jsonResponse({
+      items: matching.slice((page - 1) * pageSize, page * pageSize),
+      page,
+      pageSize,
+      totalItems: matching.length,
+      totalPages: matching.length === 0 ? 0 : Math.ceil(matching.length / pageSize),
+    });
+  }
+
+  mockFetch().mockImplementation(handle);
+  summaryFetch.mockImplementation(handle);
+
+  return {
+    state,
+    handle,
+    patchBodies,
+    failPatchWith(response: () => Promise<Response>) {
+      patchOverride = response;
+    },
+    restorePatch() {
+      patchOverride = undefined;
+    },
+    deleteUrls,
+    failDeleteWith(response: () => Promise<Response>) {
+      deleteOverride = response;
+    },
+    restoreDelete() {
+      deleteOverride = undefined;
+    },
+  };
+}
+
+function listGetCount() {
+  return mockFetch().mock.calls.filter(([, init]) => (init?.method ?? "GET") === "GET").length;
+}
+
 describe("HomePage", () => {
   it("renders the heading", async () => {
     mockFetch().mockResolvedValue(jsonResponse(listBody(todos)));
@@ -394,7 +474,7 @@ describe("HomePage", () => {
       await userEvent.click(await filterLink("Active"));
 
       expect(router.state.location.href).toBe("/?status=active");
-      expect(await screen.findByRole("status")).toHaveTextContent(/updating results/i);
+      expect(await screen.findByText(/updating results/i)).toHaveAttribute("role", "status");
       expect(screen.getByText("Water the plants")).toBeInTheDocument();
       expect(screen.getByRole("checkbox", { name: /Buy oat milk/ })).toBeDisabled();
       expect(screen.queryByText("2 todos")).not.toBeInTheDocument();
@@ -905,69 +985,6 @@ describe("HomePage", () => {
   });
 
   describe("toggle all", () => {
-    type ServerTodo = (typeof todos)[number];
-
-    function makeTodos(count: number, isCompleted: (index: number) => boolean): ServerTodo[] {
-      return Array.from({ length: count }, (_, index) => ({
-        id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
-        title: `Todo number ${index + 1}`,
-        completed: isCompleted(index),
-        createdAt: new Date(Date.UTC(2026, 9, 1, 0, index)).toISOString(),
-      }));
-    }
-
-    // A small in-memory server for GET /todos and PATCH /todos.
-    function fakeServer(initial: ServerTodo[]) {
-      const state = { items: initial.map((todo) => ({ ...todo })) };
-      const patchBodies: unknown[] = [];
-      let patchOverride: (() => Promise<Response>) | undefined;
-
-      async function handle(url: string, init?: RequestInit): Promise<Response> {
-        if (init?.method === "PATCH" && url === "/todos") {
-          const body = JSON.parse(String(init.body)) as { completed: boolean };
-          patchBodies.push(body);
-          if (patchOverride) return patchOverride();
-          const changed = state.items.filter((todo) => todo.completed !== body.completed);
-          for (const todo of changed) todo.completed = body.completed;
-          return jsonResponse({ updatedCount: changed.length });
-        }
-
-        const params = new URL(url, "http://test").searchParams;
-        const status = params.get("status");
-        const page = Number(params.get("page") ?? 1);
-        const pageSize = Number(params.get("pageSize") ?? 20);
-        const matching = state.items.filter((todo) =>
-          status === "active" ? !todo.completed : status === "completed" ? todo.completed : true,
-        );
-        return jsonResponse({
-          items: matching.slice((page - 1) * pageSize, page * pageSize),
-          page,
-          pageSize,
-          totalItems: matching.length,
-          totalPages: matching.length === 0 ? 0 : Math.ceil(matching.length / pageSize),
-        });
-      }
-
-      mockFetch().mockImplementation(handle);
-      summaryFetch.mockImplementation(handle);
-
-      return {
-        state,
-        handle,
-        patchBodies,
-        failPatchWith(response: () => Promise<Response>) {
-          patchOverride = response;
-        },
-        restorePatch() {
-          patchOverride = undefined;
-        },
-      };
-    }
-
-    function listGetCount() {
-      return mockFetch().mock.calls.filter(([, init]) => (init?.method ?? "GET") === "GET").length;
-    }
-
     it("reads the whole collection and marks every todo completed", async () => {
       const server = fakeServer(makeTodos(12, (index) => index >= 3));
 
@@ -1158,6 +1175,249 @@ describe("HomePage", () => {
       await waitFor(() => expect(toggleAll).toHaveAttribute("aria-disabled", "true"));
       await userEvent.click(toggleAll);
       expect(server.patchBodies).toHaveLength(0);
+    });
+  });
+  describe("clear completed", () => {
+    function clearButton(name: string | RegExp = /^Clear (all|the)/) {
+      return screen.findByRole("button", { name });
+    }
+
+    it("deletes every completed todo, refreshes, and focuses toggle-all", async () => {
+      const server = fakeServer(makeTodos(12, (index) => index >= 8));
+
+      renderPage();
+
+      const button = await clearButton("Clear all 4 completed todos");
+      expect(
+        screen.queryByText("Applies to all todos, not only this view."),
+      ).not.toBeInTheDocument();
+      const listGetsBefore = listGetCount();
+
+      await userEvent.click(button);
+
+      expect(await screen.findByText("Cleared 4 completed todos.")).toBeInTheDocument();
+      expect(server.deleteUrls).toEqual(["/todos?status=completed"]);
+      const deleteCall = mockFetch().mock.calls.find(([, init]) => init?.method === "DELETE");
+      expect(deleteCall?.[1]).not.toHaveProperty("body");
+      expect(screen.queryByRole("button", { name: /^Clear (all|the)/ })).not.toBeInTheDocument();
+      expect(listGetCount()).toBeGreaterThan(listGetsBefore);
+      expect(await screen.findByText("8 todos")).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: "Mark all 8 todos as completed" })).toHaveFocus();
+    });
+
+    it("focuses the empty heading when no todos remain", async () => {
+      fakeServer(makeTodos(2, () => true));
+
+      renderPage();
+      await userEvent.click(await clearButton("Clear all 2 completed todos"));
+
+      const heading = await screen.findByRole("heading", { name: "No todos yet." });
+      await waitFor(() => expect(heading).toHaveFocus());
+      expect(screen.getByText("Cleared 2 completed todos.")).toBeInTheDocument();
+      expect(screen.queryByRole("checkbox", { name: /^Mark all/ })).not.toBeInTheDocument();
+    });
+
+    it("counts the whole collection on a filtered view and shows the scope note", async () => {
+      fakeServer(makeTodos(12, (index) => index >= 8));
+
+      renderPage("/?status=active");
+
+      const button = await clearButton("Clear all 4 completed todos");
+      expect(button).toHaveAccessibleDescription("Applies to all todos, not only this view.");
+      expect(await screen.findByText("8 active todos")).toBeInTheDocument();
+    });
+
+    it("counts the whole collection across pages", async () => {
+      fakeServer(makeTodos(25, (index) => index < 3));
+
+      renderPage("/?page=2");
+
+      expect(await screen.findByText("Todo number 21")).toBeInTheDocument();
+      expect(await clearButton("Clear all 3 completed todos")).toBeInTheDocument();
+    });
+
+    it("is hidden when no todo is completed", async () => {
+      fakeServer(makeTodos(3, () => false));
+
+      renderPage();
+
+      await screen.findByRole("checkbox", { name: "Mark all 3 todos as completed" });
+      expect(screen.queryByRole("button", { name: /^Clear (all|the)/ })).not.toBeInTheDocument();
+    });
+
+    it("empties the Completed view after clearing", async () => {
+      fakeServer(makeTodos(3, (index) => index === 0));
+
+      renderPage("/?status=completed");
+
+      await screen.findByText("Todo number 1");
+      await userEvent.click(await clearButton("Clear the 1 completed todo"));
+
+      expect(await screen.findByText("No completed todos.")).toBeInTheDocument();
+      expect(await screen.findByText("Cleared 1 completed todo.")).toBeInTheDocument();
+    });
+
+    it("locks the button, the rows, and toggle-all while pending", async () => {
+      const server = fakeServer(makeTodos(3, (index) => index === 0));
+      let release: () => void = () => {};
+      server.failDeleteWith(
+        () =>
+          new Promise((resolve) => {
+            release = () => {
+              server.state.items = server.state.items.filter((todo) => !todo.completed);
+              resolve(jsonResponse({ deletedCount: 1 }));
+            };
+          }),
+      );
+
+      renderPage();
+      const button = await clearButton("Clear the 1 completed todo");
+      await userEvent.dblClick(button);
+
+      expect(await screen.findByText("Clearing completed todos")).toBeInTheDocument();
+      expect(button).toHaveAttribute("aria-disabled", "true");
+      expect(button).toHaveFocus();
+      expect(screen.getByText("Todo number 1")).toBeInTheDocument();
+      expect(
+        screen.getByRole("checkbox", { name: "Mark Todo number 2 as completed" }),
+      ).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Delete Todo number 2" })).toBeDisabled();
+      const toggleAll = screen.getByRole("checkbox", { name: "Mark all 3 todos as completed" });
+      expect(toggleAll).toHaveAttribute("aria-disabled", "true");
+      await userEvent.click(toggleAll);
+      expect(server.patchBodies).toHaveLength(0);
+      expect(server.deleteUrls).toHaveLength(1);
+
+      release();
+      expect(await screen.findByText("Cleared 1 completed todo.")).toBeInTheDocument();
+      expect(server.deleteUrls).toHaveLength(1);
+    });
+
+    it("does not move focus if the user moved it while pending", async () => {
+      const server = fakeServer(makeTodos(3, (index) => index === 0));
+      let release: () => void = () => {};
+      server.failDeleteWith(
+        () =>
+          new Promise((resolve) => {
+            release = () => {
+              server.state.items = server.state.items.filter((todo) => !todo.completed);
+              resolve(jsonResponse({ deletedCount: 1 }));
+            };
+          }),
+      );
+
+      renderPage();
+      await userEvent.click(await clearButton("Clear the 1 completed todo"));
+      await screen.findByText("Clearing completed todos");
+      const searchBox = screen.getByRole("searchbox");
+      searchBox.focus();
+
+      release();
+      expect(await screen.findByText("Cleared 1 completed todo.")).toBeInTheDocument();
+      expect(searchBox).toHaveFocus();
+    });
+
+    it("keeps focus on the button when completed todos remain after success", async () => {
+      const server = fakeServer(makeTodos(3, (index) => index === 0));
+      server.failDeleteWith(async () => {
+        server.state.items = server.state.items.filter((todo) => !todo.completed);
+        server.state.items.push({ ...makeTodos(4, () => true)[3] });
+        return jsonResponse({ deletedCount: 1 });
+      });
+
+      renderPage();
+      const button = await clearButton("Clear the 1 completed todo");
+      await userEvent.click(button);
+
+      expect(await screen.findByText("Cleared 1 completed todo.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Clear the 1 completed todo" })).toHaveFocus();
+    });
+
+    it("shows an alert on failure, keeps focus, refreshes, and retries", async () => {
+      const server = fakeServer(makeTodos(3, (index) => index === 0));
+      server.failDeleteWith(async () => jsonResponse({ error: { type: "internal" } }, 500));
+
+      renderPage();
+      const button = await clearButton("Clear the 1 completed todo");
+      const listGetsBefore = listGetCount();
+      await userEvent.click(button);
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(
+        "The server could not clear your completed todos. Try again.",
+      );
+      expect(alert).not.toHaveTextContent("500");
+      expect(button).toHaveFocus();
+      await waitFor(() => expect(listGetCount()).toBeGreaterThan(listGetsBefore));
+      expect(screen.getByText("Todo number 1")).toBeInTheDocument();
+
+      server.restoreDelete();
+      await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+
+      expect(await screen.findByText("Cleared 1 completed todo.")).toBeInTheDocument();
+      expect(server.deleteUrls).toEqual(["/todos?status=completed", "/todos?status=completed"]);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("hides the alert and moves focus when the refetch after a failure shows none left", async () => {
+      const server = fakeServer(makeTodos(3, (index) => index === 0));
+      server.failDeleteWith(async () => {
+        server.state.items = server.state.items.filter((todo) => !todo.completed);
+        throw new TypeError("Failed to fetch");
+      });
+
+      renderPage();
+      await userEvent.click(await clearButton("Clear the 1 completed todo"));
+
+      const toggleAll = await screen.findByRole("checkbox", {
+        name: "Mark all 2 todos as completed",
+      });
+      await waitFor(() => expect(toggleAll).toHaveFocus());
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("is hidden when the summary fails and the list still works", async () => {
+      fakeServer(makeTodos(3, () => true));
+      summaryFetch.mockResolvedValue(jsonResponse({ error: { type: "internal" } }, 500));
+
+      renderPage();
+
+      expect(await screen.findByText("Todo number 1")).toBeInTheDocument();
+      await waitFor(() => expect(summaryFetch).toHaveBeenCalled());
+      expect(screen.queryByRole("button", { name: /^Clear (all|the)/ })).not.toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: "Mark Todo number 1 as active" })).toBeEnabled();
+    });
+
+    it("is locked while a row toggle is pending", async () => {
+      const server = fakeServer(makeTodos(3, (index) => index === 0));
+      mockFetch().mockImplementation((url: string, init?: RequestInit) =>
+        init?.method === "PATCH" ? new Promise<Response>(() => {}) : server.handle(url, init),
+      );
+
+      renderPage();
+      const button = await clearButton("Clear the 1 completed todo");
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Mark Todo number 2 as completed" }),
+      );
+
+      await waitFor(() => expect(button).toHaveAttribute("aria-disabled", "true"));
+      await userEvent.click(button);
+      expect(server.deleteUrls).toHaveLength(0);
+    });
+
+    it("is locked while toggle-all is pending", async () => {
+      const server = fakeServer(makeTodos(3, (index) => index === 0));
+      server.failPatchWith(() => new Promise<Response>(() => {}));
+
+      renderPage();
+      const button = await clearButton("Clear the 1 completed todo");
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Mark all 3 todos as completed" }),
+      );
+
+      await waitFor(() => expect(button).toHaveAttribute("aria-disabled", "true"));
+      await userEvent.click(button);
+      expect(server.deleteUrls).toHaveLength(0);
     });
   });
 });

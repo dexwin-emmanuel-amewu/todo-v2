@@ -1,3 +1,5 @@
+import type { Ref } from "react";
+
 import {
   getToggleAllErrorMessage,
   getToggleAllLabel,
@@ -22,6 +24,7 @@ export function TodoToggleAll({
   error,
   onToggle,
   onRetry,
+  inputRef,
 }: {
   totalCount: number;
   checked: boolean;
@@ -34,6 +37,7 @@ export function TodoToggleAll({
   error: unknown;
   onToggle: (completed: boolean) => void;
   onRetry: () => void;
+  inputRef?: Ref<HTMLInputElement>;
 }) {
   const unavailable = isPending || locked;
   const label = getToggleAllLabel({ totalCount, desired });
@@ -42,6 +46,7 @@ export function TodoToggleAll({
     <div className="mb-3">
       <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
         <input
+          ref={inputRef}
           type="checkbox"
           checked={checked}
           aria-disabled={unavailable}
