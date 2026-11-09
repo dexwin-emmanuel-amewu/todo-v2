@@ -519,6 +519,7 @@ export function TodoList({
   totalItems,
   onClearSearch,
   bulkPending = false,
+  emptyHeadingRef: passedEmptyHeadingRef,
 }: {
   state: TodoListViewState;
   filter?: TodoStatusFilter;
@@ -529,6 +530,7 @@ export function TodoList({
   replacement?: ReplacementControls;
   deletion?: DeletionControls;
   bulkPending?: boolean;
+  emptyHeadingRef?: RefObject<HTMLHeadingElement | null>;
 }) {
   const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
   const editButtonRefs = useRef(new Map<string, HTMLButtonElement>());

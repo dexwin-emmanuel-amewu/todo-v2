@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { TodoApiError } from "../api/todo.api";
@@ -127,5 +128,11 @@ describe("TodoToggleAll", () => {
     expect(screen.getByRole("checkbox")).toHaveAccessibleDescription(
       "Applies to all todos, not only this view.",
     );
+  });
+
+  it("passes the ref to the checkbox", () => {
+    const inputRef = createRef<HTMLInputElement>();
+    renderToggle({ inputRef });
+    expect(inputRef.current).toBe(screen.getByRole("checkbox"));
   });
 });
