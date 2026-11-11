@@ -642,3 +642,66 @@ describe("TodoList", () => {
     });
   });
 });
+
+describe("TodoList in selection mode", () => {
+  it("renders one Select checkbox per row and no completion checkbox, Edit, or Delete", () => {
+    render(
+      <TodoList
+        state={{ state: "ready", items }}
+        selection={{ selectedIds: new Set(), onToggleRow: vi.fn() }}
+      />,
+    );
+
+    expect(screen.getAllByRole("checkbox")).toHaveLength(3);
+    expect(screen.getByRole("checkbox", { name: "Select Buy oat milk" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select Water the plants" })).not.toBeChecked();
+    expect(screen.queryByRole("checkbox", { name: /^Mark / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Edit / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Delete / })).not.toBeInTheDocument();
+  });
+
+  it("checks the selected rows and keeps the completion badges", () => {
+    render(
+      <TodoList
+        state={{ state: "ready", items }}
+        selection={{ selectedIds: new Set([items[1].id]), onToggleRow: vi.fn() }}
+      />,
+    );
+
+    expect(screen.getByRole("checkbox", { name: "Select Water the plants" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select Buy oat milk" })).not.toBeChecked();
+    const listItems = screen.getAllByRole("listitem");
+    expect(listItems[0]).toHaveTextContent("Active");
+    expect(listItems[1]).toHaveTextContent("Completed");
+  });
+
+  it("calls onToggleRow and never the completion handler", async () => {
+    const onToggleRow = vi.fn();
+    const onToggle = vi.fn();
+    render(
+      <TodoList
+        state={{ state: "ready", items }}
+        completion={{ isPending: false, error: null, onToggle, onRetry: vi.fn() }}
+        selection={{ selectedIds: new Set(), onToggleRow }}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", { name: "Select Buy oat milk" });
+    checkbox.focus();
+    await userEvent.keyboard(" ");
+    expect(onToggleRow).toHaveBeenCalledWith(items[0].id);
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("does not enter edit mode on double-click", async () => {
+    render(
+      <TodoList
+        state={{ state: "ready", items }}
+        selection={{ selectedIds: new Set(), onToggleRow: vi.fn() }}
+      />,
+    );
+
+    await userEvent.dblClick(screen.getByText("Buy oat milk"));
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+});

@@ -1,11 +1,12 @@
 import { getRouteApi } from "@tanstack/react-router";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useReducer, useRef, type KeyboardEvent } from "react";
 
 import { TodoClearCompleted } from "../components/TodoClearCompleted";
 import { TodoFilters } from "../components/TodoFilters";
 import { TodoList } from "../components/TodoList";
 import { TodoPagination } from "../components/TodoPagination";
 import { TodoSearch } from "../components/TodoSearch";
+import { TodoSelectButton, TodoSelectionBar } from "../components/TodoSelectionBar";
 import { TodoToggleAll } from "../components/TodoToggleAll";
 import { CreateTodoForm } from "../components/CreateTodoForm";
 import { useClearCompletedTodosMutation } from "../hooks/useClearCompletedTodosMutation";
@@ -19,6 +20,11 @@ import { getClearCompletedState } from "../module/todo.clearCompleted";
 import { getTodoStatusFilter } from "../module/todo.filter";
 import { DEFAULT_PAGE_SIZE, getPageRedirect } from "../module/todo.pagination";
 import { getTodoListPageLink, getTodoListSearchLink } from "../module/todo.search";
+import {
+  getSelectPageState,
+  initialSelectionState,
+  selectionReducer,
+} from "../module/todo.selection";
 import { getTodoListViewState, type TodoListViewState } from "../module/todo.state";
 import { getToggleAllState } from "../module/todo.toggleAll";
 
@@ -93,6 +99,15 @@ export function HomePage() {
   const clearButtonRef = useRef<HTMLButtonElement>(null);
   const emptyHeadingRef = useRef<HTMLHeadingElement>(null);
   const pendingClearFocus = useRef(false);
+  const [selection, dispatchSelection] = useReducer(selectionReducer, initialSelectionState);
+  const selectButtonRef = useRef<HTMLButtonElement>(null);
+  const selectPageButtonRef = useRef<HTMLButtonElement>(null);
+  const pendingSelectionFocus = useRef<"page_button" | "select_button" | "empty_heading" | null>(
+    null,
+  );
+  const lastSettledTotal = useRef<{ status: string; search?: string; totalItems: number } | null>(
+    null,
+  );
 
   const queryState = getTodoListViewState({
     status: query.status,
@@ -152,6 +167,66 @@ export function HomePage() {
         }
       : null;
 
+  const selecting = selection.mode === "on";
+  const visibleIds = "items" in state ? state.items.map((todo) => todo.id) : [];
+  const selectedIds = selecting ? selection.selectedIds : new Set<string>();
+  const selectLocked = rowMutationPending || bulkPending;
+  const showSelectButton =
+    !selecting &&
+    redirectPage === undefined &&
+    (queryState.state === "ready" ||
+      queryState.state === "refreshing" ||
+      queryState.state === "loading_query") &&
+    query.data !== undefined &&
+    query.data.totalItems > 0;
+
+  // The selection belongs to one status and one search. Paging keeps it.
+  useEffect(() => {
+    dispatchSelection({ type: "scope_changed", scope: { status: filter, search } });
+  }, [filter, search]);
+
+  // A view that had todos and refetches empty ends selection mode.
+  useEffect(() => {
+    if (!settled) return;
+    const previous = lastSettledTotal.current;
+    lastSettledTotal.current = { status: filter, search, totalItems: settled.totalItems };
+    const sameView = previous?.status === filter && previous.search === search;
+    if (selecting && sameView && previous.totalItems > 0 && settled.totalItems === 0) {
+      pendingSelectionFocus.current = "empty_heading";
+      dispatchSelection({ type: "list_emptied" });
+    }
+  }, [settled, filter, search, selecting]);
+
+  useLayoutEffect(() => {
+    const target = pendingSelectionFocus.current;
+    if (!target) return;
+    const element =
+      target === "page_button"
+        ? selectPageButtonRef.current
+        : target === "select_button"
+          ? selectButtonRef.current
+          : emptyHeadingRef.current;
+    if (!element) return;
+    pendingSelectionFocus.current = null;
+    element.focus();
+  });
+
+  const enterSelection = () => {
+    if (selectLocked) return;
+    pendingSelectionFocus.current = "page_button";
+    dispatchSelection({ type: "enter", scope: { status: filter, search } });
+  };
+  const exitSelection = () => {
+    pendingSelectionFocus.current = "select_button";
+    dispatchSelection({ type: "exit" });
+  };
+  const onSelectionKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (selecting && event.key === "Escape") {
+      event.preventDefault();
+      exitSelection();
+    }
+  };
+
   const clearState = summaryQuery.data
     ? getClearCompletedState(summaryQuery.data)
     : ({ state: "hidden" } as const);
@@ -195,52 +270,84 @@ export function HomePage() {
       <CreateTodoForm />
       <TodoSearch value={search} onCommit={commitSearch} inputRef={searchInputRef} />
       <TodoFilters />
-      {summaryQuery.isSuccess && toggleAll?.state === "visible" && (
-        <TodoToggleAll
-          totalCount={toggleAll.totalCount}
-          checked={toggleAll.checked}
-          desired={toggleAll.desired}
-          scoped={filter !== "all" || Boolean(search)}
-          isPending={toggleAllMutation.isPending}
-          pendingCompleted={toggleAllMutation.variables}
-          locked={rowMutationPending || clearMutation.isPending}
-          result={toggleAllResult}
-          error={toggleAllMutation.error}
-          onToggle={(completed) => {
-            if (!toggleAllMutation.isPending && !rowMutationPending && !clearMutation.isPending) {
-              toggleAllMutation.mutate(completed);
-            }
+      <div onKeyDown={onSelectionKeyDown}>
+        {showSelectButton && (
+          <TodoSelectButton
+            locked={selectLocked}
+            onEnter={enterSelection}
+            buttonRef={selectButtonRef}
+          />
+        )}
+        {selecting && (
+          <TodoSelectionBar
+            selectedCount={selection.selectedIds.size}
+            pageState={getSelectPageState(visibleIds, selection.selectedIds)}
+            notice={selection.notice}
+            onSelectPage={() => dispatchSelection({ type: "select_page", ids: visibleIds })}
+            onUnselectPage={() => dispatchSelection({ type: "unselect_page", ids: visibleIds })}
+            onClear={() => {
+              pendingSelectionFocus.current = "page_button";
+              dispatchSelection({ type: "clear" });
+            }}
+            onDone={exitSelection}
+            pageButtonRef={selectPageButtonRef}
+          />
+        )}
+        {!selecting && summaryQuery.isSuccess && toggleAll?.state === "visible" && (
+          <TodoToggleAll
+            totalCount={toggleAll.totalCount}
+            checked={toggleAll.checked}
+            desired={toggleAll.desired}
+            scoped={filter !== "all" || Boolean(search)}
+            isPending={toggleAllMutation.isPending}
+            pendingCompleted={toggleAllMutation.variables}
+            locked={rowMutationPending || clearMutation.isPending}
+            result={toggleAllResult}
+            error={toggleAllMutation.error}
+            onToggle={(completed) => {
+              if (!toggleAllMutation.isPending && !rowMutationPending && !clearMutation.isPending) {
+                toggleAllMutation.mutate(completed);
+              }
+            }}
+            onRetry={() => {
+              const completed = toggleAllMutation.variables;
+              if (
+                completed !== undefined &&
+                !toggleAllMutation.isPending &&
+                !rowMutationPending &&
+                !clearMutation.isPending
+              ) {
+                toggleAllMutation.mutate(completed);
+              }
+            }}
+            inputRef={toggleAllInputRef}
+          />
+        )}
+        <TodoList
+          state={state}
+          filter={filter}
+          search={search}
+          onClearSearch={() => {
+            commitSearch(undefined);
+            searchInputRef.current?.focus();
           }}
-          onRetry={() => {
-            const completed = toggleAllMutation.variables;
-            if (
-              completed !== undefined &&
-              !toggleAllMutation.isPending &&
-              !rowMutationPending &&
-              !clearMutation.isPending
-            ) {
-              toggleAllMutation.mutate(completed);
-            }
-          }}
-          inputRef={toggleAllInputRef}
+          totalItems={query.data?.totalItems}
+          completion={completion}
+          replacement={replacement}
+          deletion={deletion}
+          bulkPending={bulkPending}
+          emptyHeadingRef={emptyHeadingRef}
+          selection={
+            selecting
+              ? {
+                  selectedIds,
+                  onToggleRow: (todoId) => dispatchSelection({ type: "toggle_row", id: todoId }),
+                }
+              : undefined
+          }
         />
-      )}
-      <TodoList
-        state={state}
-        filter={filter}
-        search={search}
-        onClearSearch={() => {
-          commitSearch(undefined);
-          searchInputRef.current?.focus();
-        }}
-        totalItems={query.data?.totalItems}
-        completion={completion}
-        replacement={replacement}
-        deletion={deletion}
-        bulkPending={bulkPending}
-        emptyHeadingRef={emptyHeadingRef}
-      />
-      {summaryQuery.isSuccess && (
+      </div>
+      {!selecting && summaryQuery.isSuccess && (
         <TodoClearCompleted
           completedCount={clearState.state === "visible" ? clearState.completedCount : 0}
           scoped={filter !== "all" || Boolean(search)}

@@ -85,7 +85,7 @@ function renderPage(url = "/") {
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  return { router, history };
+  return { router, history, queryClient };
 }
 
 function respondByStatus(items: typeof todos) {
@@ -1419,5 +1419,277 @@ describe("HomePage", () => {
       await userEvent.click(button);
       expect(server.deleteUrls).toHaveLength(0);
     });
+  });
+});
+
+describe("HomePage selection mode", () => {
+  async function enterSelection() {
+    await userEvent.click(await screen.findByRole("button", { name: "Select todos" }));
+    return screen.getByRole("group", { name: "Selection" });
+  }
+
+  function countText(group: HTMLElement) {
+    return within(group).getAllByRole("status")[0];
+  }
+
+  function nonGetRequests() {
+    return mockFetch().mock.calls.filter(([, init]) => (init?.method ?? "GET") !== "GET");
+  }
+
+  it("hides Select todos while the list loads and when it is empty", async () => {
+    fakeServer([]);
+
+    renderPage();
+
+    expect(screen.queryByRole("button", { name: "Select todos" })).not.toBeInTheDocument();
+    expect(await screen.findByText("No todos yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Select todos" })).not.toBeInTheDocument();
+  });
+
+  it("hides Select todos when the list fails", async () => {
+    mockFetch().mockRejectedValue(new TypeError("Failed to fetch"));
+
+    renderPage();
+
+    await screen.findByText(/could not load your todos/i);
+    expect(screen.queryByRole("button", { name: "Select todos" })).not.toBeInTheDocument();
+  });
+
+  it("locks Select todos while a row toggle is pending", async () => {
+    const server = fakeServer(makeTodos(3, () => false));
+    mockFetch().mockImplementation((url: string, init?: RequestInit) =>
+      init?.method === "PATCH" ? new Promise<Response>(() => {}) : server.handle(url, init),
+    );
+
+    renderPage();
+    const button = await screen.findByRole("button", { name: "Select todos" });
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: "Mark Todo number 1 as completed" }),
+    );
+
+    await waitFor(() => expect(button).toHaveAttribute("aria-disabled", "true"));
+    await userEvent.click(button);
+    expect(screen.queryByRole("group", { name: "Selection" })).not.toBeInTheDocument();
+  });
+
+  it("locks Select todos while toggle-all is pending", async () => {
+    const server = fakeServer(makeTodos(3, () => false));
+    server.failPatchWith(() => new Promise<Response>(() => {}));
+
+    renderPage();
+    const button = await screen.findByRole("button", { name: "Select todos" });
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: "Mark all 3 todos as completed" }),
+    );
+
+    await waitFor(() => expect(button).toHaveAttribute("aria-disabled", "true"));
+    await userEvent.click(button);
+    expect(screen.queryByRole("group", { name: "Selection" })).not.toBeInTheDocument();
+  });
+
+  it("enters selection mode, hides the standard batch controls, and focuses Select this page", async () => {
+    fakeServer(makeTodos(3, (index) => index === 0));
+
+    renderPage();
+    await screen.findByRole("button", { name: "Clear the 1 completed todo" });
+    await screen.findByRole("checkbox", { name: /^Mark all/ });
+
+    const group = await enterSelection();
+
+    expect(countText(group)).toHaveTextContent("0 selected");
+    expect(within(group).getByRole("button", { name: "Select this page" })).toHaveFocus();
+    expect(screen.queryByRole("checkbox", { name: /^Mark all/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Clear (all|the)/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /^Mark Todo/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^(Edit|Delete) / })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select Todo number 1" })).not.toBeChecked();
+    expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("Completed");
+  });
+
+  it("selects rows without sending a request or changing completion", async () => {
+    fakeServer(makeTodos(3, (index) => index === 0));
+
+    renderPage();
+    const group = await enterSelection();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 1" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 2" }));
+
+    expect(countText(group)).toHaveTextContent("2 selected");
+    expect(nonGetRequests()).toHaveLength(0);
+    const rows = screen.getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent("Completed");
+    expect(rows[1]).toHaveTextContent("Active");
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 1" }));
+    expect(countText(group)).toHaveTextContent("1 selected");
+  });
+
+  it("selects and unselects the visible page only", async () => {
+    fakeServer(makeTodos(25, () => false));
+
+    renderPage();
+    const group = await enterSelection();
+    await userEvent.click(within(group).getByRole("button", { name: "Select this page" }));
+    expect(countText(group)).toHaveTextContent("20 selected");
+
+    await userEvent.click(screen.getByRole("button", { name: "Next page" }));
+    await screen.findByText("Todo number 21");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 21" }));
+    expect(countText(group)).toHaveTextContent("21 selected");
+
+    await userEvent.click(screen.getByRole("button", { name: "Previous page" }));
+    await screen.findByText("Todo number 1");
+    expect(screen.getByRole("checkbox", { name: "Select Todo number 1" })).toBeChecked();
+    await userEvent.click(within(group).getByRole("button", { name: "Unselect this page" }));
+    expect(countText(group)).toHaveTextContent("1 selected");
+    expect(within(group).getByRole("button", { name: "Select this page" })).toBeVisible();
+  });
+
+  it("keeps the selection across pages and page sizes", async () => {
+    fakeServer(makeTodos(25, () => false));
+
+    renderPage();
+    const group = await enterSelection();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 2" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Next page" }));
+    await screen.findByText("Todo number 21");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 22" }));
+    expect(countText(group)).toHaveTextContent("2 selected");
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Todos per page" }), "50");
+    await screen.findByText("Todo number 25");
+    expect(screen.getByRole("checkbox", { name: "Select Todo number 2" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select Todo number 22" })).toBeChecked();
+    expect(countText(group)).toHaveTextContent("2 selected");
+  });
+
+  it("clears the selection when the status changes and keeps the mode", async () => {
+    fakeServer(makeTodos(4, (index) => index < 2));
+
+    renderPage();
+    const group = await enterSelection();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 3" }));
+    expect(countText(group)).toHaveTextContent("1 selected");
+
+    await userEvent.click(await filterLink("Active"));
+
+    await waitFor(() => expect(countText(group)).toHaveTextContent("0 selected"));
+    expect(
+      within(group).getByText("Selection cleared because the view changed."),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole("checkbox", { name: "Select Todo number 3" })).not.toBeChecked();
+  });
+
+  it("clears the selection when the search changes", async () => {
+    fakeServer(makeTodos(4, () => false));
+
+    const { router } = renderPage();
+    const group = await enterSelection();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 1" }));
+
+    await router.navigate({ to: "/", search: { search: "number" } });
+
+    await waitFor(() => expect(countText(group)).toHaveTextContent("0 selected"));
+    expect(
+      within(group).getByText("Selection cleared because the view changed."),
+    ).toBeInTheDocument();
+  });
+
+  it("refuses a row and a page past the 100-item limit", async () => {
+    fakeServer(makeTodos(120, () => false));
+
+    renderPage("/?pageSize=100");
+    const group = await enterSelection();
+    await screen.findByText("Todo number 100");
+    await userEvent.click(within(group).getByRole("button", { name: "Select this page" }));
+    expect(countText(group)).toHaveTextContent("100 selected");
+
+    await userEvent.click(screen.getByRole("button", { name: "Next page" }));
+    await screen.findByText("Todo number 101");
+    const row = screen.getByRole("checkbox", { name: "Select Todo number 101" });
+    await userEvent.click(row);
+
+    expect(row).not.toBeChecked();
+    expect(countText(group)).toHaveTextContent("100 selected");
+    const limit = "You can select up to 100 todos. Unselect some to add more.";
+    expect(within(group).getByText(limit)).toBeInTheDocument();
+
+    await userEvent.click(within(group).getByRole("button", { name: "Select this page" }));
+    expect(countText(group)).toHaveTextContent("100 selected");
+    expect(within(group).getByText(limit)).toBeInTheDocument();
+  });
+
+  it("clears the selection, stays on, and focuses Select this page", async () => {
+    fakeServer(makeTodos(3, () => false));
+
+    renderPage();
+    const group = await enterSelection();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 1" }));
+    const clear = within(group).getByRole("button", { name: "Clear selection" });
+    await userEvent.click(clear);
+
+    expect(countText(group)).toHaveTextContent("0 selected");
+    expect(clear).toHaveAttribute("aria-disabled", "true");
+    expect(within(group).getByRole("button", { name: "Select this page" })).toHaveFocus();
+  });
+
+  it("exits with Done, restores the row controls, and focuses Select todos", async () => {
+    fakeServer(makeTodos(3, () => false));
+
+    renderPage();
+    const group = await enterSelection();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 1" }));
+    await userEvent.click(within(group).getByRole("button", { name: "Done" }));
+
+    expect(screen.queryByRole("group", { name: "Selection" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select todos" })).toHaveFocus();
+    expect(
+      screen.getByRole("checkbox", { name: "Mark Todo number 1 as completed" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit Todo number 1" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /^Mark all/ })).toBeInTheDocument();
+
+    const again = await enterSelection();
+    expect(countText(again)).toHaveTextContent("0 selected");
+  });
+
+  it("exits with Escape from a row checkbox", async () => {
+    fakeServer(makeTodos(3, () => false));
+
+    renderPage();
+    await enterSelection();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 2" }));
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.queryByRole("group", { name: "Selection" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select todos" })).toHaveFocus();
+  });
+
+  it("exits and focuses the empty heading when the list refetches empty", async () => {
+    const server = fakeServer(makeTodos(2, () => false));
+
+    const { queryClient } = renderPage();
+    await enterSelection();
+    server.state.items = [];
+    await queryClient.invalidateQueries();
+
+    const heading = await screen.findByRole("heading", { name: "No todos yet." });
+    await waitFor(() => expect(heading).toHaveFocus());
+    expect(screen.queryByRole("group", { name: "Selection" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the bar and its Done button when the list fails to refresh", async () => {
+    fakeServer(makeTodos(2, () => false));
+
+    const { queryClient } = renderPage();
+    const group = await enterSelection();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 1" }));
+    mockFetch().mockRejectedValue(new TypeError("Failed to fetch"));
+    await queryClient.invalidateQueries();
+
+    expect(await screen.findByText(/could not refresh your todos/i)).toBeInTheDocument();
+    expect(countText(group)).toHaveTextContent("1 selected");
+    expect(within(group).getByRole("button", { name: "Done" })).toBeVisible();
   });
 });
