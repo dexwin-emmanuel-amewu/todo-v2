@@ -137,6 +137,20 @@ describe("selectionReducer", () => {
   });
 });
 
+describe("selectionReducer, remove_ids", () => {
+  it("removes only the given ids and keeps the mode and scope", () => {
+    expect(
+      selectionReducer(selected(["a", "b", "c"], "limit"), { type: "remove_ids", ids: ["b"] }),
+    ).toEqual(selected(["a", "c"]));
+  });
+
+  it("does nothing while off", () => {
+    expect(selectionReducer(initialSelectionState, { type: "remove_ids", ids: ["a"] })).toBe(
+      initialSelectionState,
+    );
+  });
+});
+
 describe("getSelectPageState", () => {
   it("is none for a page with no rows", () => {
     expect(getSelectPageState([], new Set(["a"]))).toBe("none");

@@ -11,6 +11,7 @@ import {
   setAllTodosCompleted,
   TODO_API_BASE_URL,
   TodoApiError,
+  updateSelectedTodos,
 } from "./todo.api";
 
 const todo = {
@@ -594,5 +595,78 @@ describe("clearCompletedTodos", () => {
 
     await expect(clearCompletedTodos()).rejects.toMatchObject({ type: "response_validation" });
     await expect(clearCompletedTodos()).rejects.toMatchObject({ type: "response_validation" });
+  });
+});
+
+describe("updateSelectedTodos", () => {
+  const otherId = "6e2d4c3b-7c2b-4cab-8c2b-7c2b5cab8c2b";
+
+  it("sends one PATCH to the batch path with the ids and boolean", async () => {
+    mockFetch().mockResolvedValue(jsonResponse({ updatedCount: 2 }));
+
+    await expect(
+      updateSelectedTodos({ ids: [todo.id, otherId], completed: true }),
+    ).resolves.toEqual({ updatedCount: 2 });
+
+    expect(mockFetch()).toHaveBeenCalledTimes(1);
+    const [url, init] = mockFetch().mock.calls[0];
+    expect(url).toBe("/todos/batch");
+    expect(init).toMatchObject({
+      method: "PATCH",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [todo.id, otherId], completed: true }),
+    });
+  });
+
+  it("rejects bad input with a request_validation error and makes no request", async () => {
+    await expect(updateSelectedTodos({ ids: [], completed: true })).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    await expect(
+      updateSelectedTodos({ ids: [todo.id, todo.id], completed: true }),
+    ).rejects.toMatchObject({ type: "request_validation" });
+    expect(mockFetch()).not.toHaveBeenCalled();
+  });
+
+  it("rejects a 409 with a batch_conflict error that carries the missing ids", async () => {
+    mockFetch().mockResolvedValue(
+      jsonResponse({ error: { type: "batch_conflict", missingIds: [otherId] } }, 409),
+    );
+
+    const error = await updateSelectedTodos({ ids: [todo.id, otherId], completed: false }).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(TodoApiError);
+    expect(error).toMatchObject({ type: "batch_conflict", status: 409, missingIds: [otherId] });
+  });
+
+  it("rejects with an http error on a 400, a 500, or a 409 without a conflict body", async () => {
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse({ error: { type: "validation", issues: [] } }, 400))
+      .mockResolvedValueOnce(jsonResponse({ error: { type: "internal" } }, 500))
+      .mockResolvedValueOnce(new Response("oops", { status: 409 }));
+
+    const input = { ids: [todo.id], completed: true };
+    await expect(updateSelectedTodos(input)).rejects.toMatchObject({ type: "http", status: 400 });
+    await expect(updateSelectedTodos(input)).rejects.toMatchObject({ type: "http", status: 500 });
+    await expect(updateSelectedTodos(input)).rejects.toMatchObject({ type: "http", status: 409 });
+  });
+
+  it("rejects with a network error when fetch rejects", async () => {
+    mockFetch().mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await expect(updateSelectedTodos({ ids: [todo.id], completed: true })).rejects.toMatchObject({
+      type: "network",
+    });
+  });
+
+  it("rejects with a response_validation error on invalid JSON or a bad body", async () => {
+    mockFetch()
+      .mockResolvedValueOnce(new Response("not json", { status: 200 }))
+      .mockResolvedValueOnce(jsonResponse({ updatedCount: 0 }));
+
+    const input = { ids: [todo.id], completed: true };
+    await expect(updateSelectedTodos(input)).rejects.toMatchObject({ type: "response_validation" });
+    await expect(updateSelectedTodos(input)).rejects.toMatchObject({ type: "response_validation" });
   });
 });

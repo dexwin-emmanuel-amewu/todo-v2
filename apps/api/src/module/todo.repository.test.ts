@@ -17,6 +17,8 @@ import {
   patchTodoById,
   replaceTodoById,
   setAllTodosCompleted,
+  type Db,
+  updateSelectedTodos,
 } from "../module/todo.repository.js";
 
 describe("todos repository", () => {
@@ -875,5 +877,90 @@ describe("todos repository, deleteCompletedTodos, empty database", () => {
     if (result.isErr()) throw result.error;
 
     expect(result.value).toEqual({ deletedCount: 0 });
+  });
+});
+
+describe("todos repository, updateSelectedTodos", () => {
+  let database: DisposableDatabase;
+  const missingId = "00000000-0000-4000-8000-000000000000";
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  async function seed(...titles: string[]) {
+    const created = [];
+    for (const title of titles) {
+      const result = await createTodo(database.db, { title });
+      if (result.isErr()) throw result.error;
+      created.push(result.value);
+    }
+    return created;
+  }
+
+  async function completedOf(id: string) {
+    const found = await getTodoById(database.db, id);
+    if (found.isErr()) throw found.error;
+    return found.value.completed;
+  }
+
+  it("marks only the listed todos completed and returns their count", async () => {
+    const [first, second, other] = await seed(
+      "Batch first todo",
+      "Batch second todo",
+      "Batch other todo",
+    );
+
+    const result = await updateSelectedTodos(database.db, [first.id, second.id], true);
+    if (result.isErr()) throw result.error;
+
+    expect(result.value).toEqual({ updatedCount: 2 });
+    expect(await completedOf(first.id)).toBe(true);
+    expect(await completedOf(second.id)).toBe(true);
+    expect(await completedOf(other.id)).toBe(false);
+  });
+
+  it("marks listed todos active and counts rows already in that state", async () => {
+    const [done] = await seed("Batch done todo");
+    const [active] = await seed("Batch active todo");
+    await updateSelectedTodos(database.db, [done.id], true);
+
+    const result = await updateSelectedTodos(database.db, [done.id, active.id], false);
+    if (result.isErr()) throw result.error;
+
+    expect(result.value).toEqual({ updatedCount: 2 });
+    expect(await completedOf(done.id)).toBe(false);
+    expect(await completedOf(active.id)).toBe(false);
+  });
+
+  it("returns batch_conflict with the missing ids and changes nothing", async () => {
+    const [first, second] = await seed("Conflict first todo", "Conflict second todo");
+
+    const result = await updateSelectedTodos(database.db, [first.id, missingId, second.id], true);
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error).toEqual({ type: "batch_conflict", missingIds: [missingId] });
+    }
+    expect(await completedOf(first.id)).toBe(false);
+    expect(await completedOf(second.id)).toBe(false);
+  });
+
+  it("returns a database error when the transaction fails", async () => {
+    const failingDb = {
+      transaction: () => Promise.reject(new Error("connection lost")),
+    } as unknown as Db;
+
+    const result = await updateSelectedTodos(failingDb, [missingId], true);
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.type).toBe("database");
+    }
   });
 });

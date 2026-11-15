@@ -43,6 +43,7 @@ type DeletionControls = {
 export type SelectionControls = {
   selectedIds: ReadonlySet<string>;
   onToggleRow: (todoId: string) => void;
+  locked: boolean;
 };
 
 const noDeletionControls: DeletionControls = {
@@ -93,7 +94,11 @@ function completionErrorMessage(error: unknown): string {
           { type: "http", status: 404 },
           () => "This todo may have been removed. Refresh the list.",
         )
-        .with({ type: "http" }, () => "The server could not update this todo. Try again.")
+        .with(
+          { type: "http" },
+          { type: "batch_conflict" },
+          () => "The server could not update this todo. Try again.",
+        )
         .with(
           { type: "response_validation" },
           () => "The server returned an unexpected response. Try again.",
@@ -116,7 +121,11 @@ function replacementErrorMessage(error: unknown): string {
           { type: "http", status: 404 },
           () => "This todo may have been removed. Refresh the list.",
         )
-        .with({ type: "http" }, () => "The server could not save this todo. Try again.")
+        .with(
+          { type: "http" },
+          { type: "batch_conflict" },
+          () => "The server could not save this todo. Try again.",
+        )
         .with(
           { type: "response_validation" },
           () => "The server returned an unexpected response. Try again.",
@@ -139,7 +148,11 @@ function deletionErrorMessage(error: unknown): string {
           { type: "http", status: 404 },
           () => "This todo no longer exists on the server. Refresh the list.",
         )
-        .with({ type: "http" }, () => "The server could not delete this todo. Try again.")
+        .with(
+          { type: "http" },
+          { type: "batch_conflict" },
+          () => "The server could not delete this todo. Try again.",
+        )
         .with(
           { type: "response_validation" },
           () => "The server returned an unexpected response. Try again.",
@@ -280,8 +293,11 @@ function TodoListItem({
             checked={selection.selectedIds.has(todo.id)}
             disabled={locked}
             aria-label={`Select ${todo.title}`}
-            onChange={() => selection.onToggleRow(todo.id)}
-            className="size-4 shrink-0 accent-sky-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
+            aria-disabled={selection.locked}
+            onChange={() => {
+              if (!selection.locked) selection.onToggleRow(todo.id);
+            }}
+            className="size-4 shrink-0 accent-sky-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
           />
           <span
             className={`${todo.completed ? "text-sm text-slate-400 line-through" : "text-sm"} min-w-0`}

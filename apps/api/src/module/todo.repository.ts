@@ -6,12 +6,17 @@ import {
   type TodoStatusFilter,
   todoSchema,
 } from "@todo/contracts";
-import { and, asc, count, eq, ilike, ne, sql } from "drizzle-orm";
+import { and, asc, count, eq, ilike, inArray, ne, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { err, ok, type Result, ResultAsync } from "neverthrow";
 import { match } from "ts-pattern";
 
-import type { DatabaseError, NotFoundError, ValidationError } from "../db/errors.js";
+import type {
+  BatchConflictError,
+  DatabaseError,
+  NotFoundError,
+  ValidationError,
+} from "../db/errors.js";
 import { todos } from "../db/schema.js";
 import type * as schema from "../db/schema.js";
 
@@ -134,6 +139,35 @@ export function setAllTodosCompleted(
       .returning({ id: todos.id }),
     toDatabaseError,
   ).map((rows) => ({ updatedCount: rows.length }));
+}
+
+export function updateSelectedTodos(
+  db: Db,
+  ids: readonly string[],
+  completed: boolean,
+): ResultAsync<{ updatedCount: number }, BatchConflictError | DatabaseError> {
+  let missingIds: string[] = [];
+
+  return ResultAsync.fromPromise(
+    db.transaction(async (tx) => {
+      const rows = await tx
+        .update(todos)
+        .set({ completed, updatedAt: sql`now()` })
+        .where(inArray(todos.id, [...ids]))
+        .returning({ id: todos.id });
+
+      if (rows.length !== ids.length) {
+        const found = new Set(rows.map((row) => row.id));
+        missingIds = ids.filter((id) => !found.has(id));
+        // Throws, so the update above is undone.
+        tx.rollback();
+      }
+
+      return rows.length;
+    }),
+    (cause): BatchConflictError | DatabaseError =>
+      missingIds.length > 0 ? { type: "batch_conflict", missingIds } : toDatabaseError(cause),
+  ).map((updatedCount) => ({ updatedCount }));
 }
 
 export type TodoPagination = { page: number; pageSize: number };

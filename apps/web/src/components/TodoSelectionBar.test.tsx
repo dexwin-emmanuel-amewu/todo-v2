@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
 
+import { TodoApiError } from "../api/todo.api";
 import { TodoSelectButton, TodoSelectionBar } from "./TodoSelectionBar";
 
 type BarProps = Parameters<typeof TodoSelectionBar>[0];
@@ -16,6 +17,11 @@ function renderBar(overrides: Partial<BarProps> = {}) {
     onUnselectPage: vi.fn(),
     onClear: vi.fn(),
     onDone: vi.fn(),
+    isPending: false,
+    result: null,
+    error: null,
+    onMarkSelected: vi.fn(),
+    onRetry: vi.fn(),
     ...overrides,
   };
   render(<TodoSelectionBar {...props} />);
@@ -54,13 +60,13 @@ describe("TodoSelectionBar", () => {
     expect(within(group).getByRole("button", { name: "Done" })).toBeVisible();
   });
 
-  it("keeps the count and the notice in separate polite regions", () => {
+  it("keeps the count, the notice, and the batch status in separate polite regions", () => {
     renderBar({ selectedCount: 3, notice: "limit" });
     const regions = screen.getAllByRole("status");
-    expect(regions).toHaveLength(2);
+    expect(regions).toHaveLength(3);
     for (const region of regions) expect(region).toHaveAttribute("aria-live", "polite");
     expect(regions[0]).toHaveTextContent("3 selected");
-    expect(regions[1]).toHaveTextContent(
+    expect(regions[2]).toHaveTextContent(
       "You can select up to 100 todos. Unselect some to add more.",
     );
   });
@@ -103,5 +109,109 @@ describe("TodoSelectionBar", () => {
     expect(props.onClear).toHaveBeenCalledTimes(1);
     expect(props.onDone).toHaveBeenCalledTimes(1);
     expect(pageButtonRef.current).toBe(screen.getByRole("button", { name: "Select this page" }));
+  });
+});
+
+describe("TodoSelectionBar, batch completion", () => {
+  const completedName = { name: "Mark selected as completed" };
+  const activeName = { name: "Mark selected as active" };
+
+  it("disables both batch buttons when nothing is selected", async () => {
+    const props = renderBar({ selectedCount: 0 });
+
+    for (const name of [completedName, activeName]) {
+      const button = screen.getByRole("button", name);
+      expect(button).toHaveAttribute("aria-disabled", "true");
+      await userEvent.click(button);
+    }
+    expect(props.onMarkSelected).not.toHaveBeenCalled();
+  });
+
+  it("calls onMarkSelected with the matching boolean", async () => {
+    const props = renderBar({ selectedCount: 2 });
+
+    await userEvent.click(screen.getByRole("button", completedName));
+    await userEvent.click(screen.getByRole("button", activeName));
+
+    expect(props.onMarkSelected).toHaveBeenNthCalledWith(1, true);
+    expect(props.onMarkSelected).toHaveBeenNthCalledWith(2, false);
+  });
+
+  const ids = ["a", "b", "c"];
+
+  it("locks every control while pending", async () => {
+    const props = renderBar({
+      selectedCount: 2,
+      isPending: true,
+      input: { ids, completed: true },
+    });
+
+    for (const name of [
+      "Select this page",
+      "Clear selection",
+      "Done",
+      "Mark selected as completed",
+      "Mark selected as active",
+    ]) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toHaveAttribute("aria-disabled", "true");
+      await userEvent.click(button);
+    }
+    expect(props.onSelectPage).not.toHaveBeenCalled();
+    expect(props.onClear).not.toHaveBeenCalled();
+    expect(props.onDone).not.toHaveBeenCalled();
+    expect(props.onMarkSelected).not.toHaveBeenCalled();
+  });
+
+  it("shows the pending message in a polite status region", () => {
+    renderBar({ selectedCount: 3, isPending: true, input: { ids, completed: true } });
+
+    const statuses = screen.getAllByRole("status");
+    expect(statuses.some((status) => status.textContent === "Marking 3 todos as completed")).toBe(
+      true,
+    );
+  });
+
+  it("shows the result message in a polite status region", () => {
+    renderBar({ result: { updatedCount: 1, completed: false } });
+
+    const statuses = screen.getAllByRole("status");
+    expect(statuses.some((status) => status.textContent === "1 todo marked as active")).toBe(true);
+  });
+
+  it("shows a failure alert with Retry", async () => {
+    const props = renderBar({
+      selectedCount: 3,
+      input: { ids, completed: true },
+      error: new TodoApiError("http", "boom", { status: 500 }),
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Could not update the selected todos. Nothing was changed.");
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(props.onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the alert while a request is pending", () => {
+    renderBar({
+      isPending: true,
+      input: { ids, completed: true },
+      error: new TodoApiError("network", "offline"),
+    });
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("hides Retry when nothing is left to retry", () => {
+    renderBar({
+      input: { ids, completed: true },
+      error: new TodoApiError("batch_conflict", "conflict", { status: 409, missingIds: ids }),
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(
+      "None of the selected todos exist anymore. Nothing was changed.",
+    );
+    expect(within(alert).queryByRole("button")).toBeNull();
   });
 });

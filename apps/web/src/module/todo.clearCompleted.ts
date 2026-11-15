@@ -40,7 +40,11 @@ export function getClearCompletedErrorMessage(error: unknown): string {
           { type: "http", status: 400 },
           () => "The completed todos could not be cleared. Refresh and try again.",
         )
-        .with({ type: "http" }, () => "The server could not clear your completed todos. Try again.")
+        .with(
+          { type: "http" },
+          { type: "batch_conflict" },
+          () => "The server could not clear your completed todos. Try again.",
+        )
         .with(
           { type: "network" },
           () => "Could not reach the server. Check your connection and try again.",
