@@ -4,16 +4,23 @@ import {
   replaceTodoSchema,
   setAllTodosCompletedSchema,
   type Todo,
+  updateSelectedTodosSchema,
 } from "@todo/contracts";
 import { errAsync, type ResultAsync } from "neverthrow";
 
-import type { DatabaseError, NotFoundError, ValidationError } from "../db/errors.js";
+import type {
+  BatchConflictError,
+  DatabaseError,
+  NotFoundError,
+  ValidationError,
+} from "../db/errors.js";
 import {
   createTodo,
   type Db,
   patchTodoById,
   replaceTodoById,
   setAllTodosCompleted,
+  updateSelectedTodos,
 } from "./todo.repository.js";
 
 export type RequestValidationError = { type: "request_validation"; issues: string[] };
@@ -82,4 +89,23 @@ export function setAllTodosCompletedService(
   }
 
   return setAllTodosCompleted(db, parsed.data.completed);
+}
+
+export function updateSelectedTodosService(
+  db: Db,
+  rawInput: unknown,
+): ResultAsync<
+  { updatedCount: number },
+  RequestValidationError | BatchConflictError | DatabaseError
+> {
+  const parsed = updateSelectedTodosSchema.safeParse(rawInput);
+
+  if (!parsed.success) {
+    return errAsync({
+      type: "request_validation",
+      issues: parsed.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  return updateSelectedTodos(db, parsed.data.ids, parsed.data.completed);
 }

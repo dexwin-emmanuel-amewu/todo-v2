@@ -87,6 +87,16 @@ curl -X PATCH http://localhost:3000/todos \
 
 Success: 200 with `{ "updatedCount": number }`, the count of todos actually changed, not the todos themselves. An empty collection, or one already matching the requested value, returns 200 with `{ "updatedCount": 0 }`. Failure: 400 with `{ "error": { "type": "validation", "issues": string[] } }` for a missing or non-boolean `completed`, 500 with `{ "error": { "type": "internal" } }` for a server-side failure.
 
+PATCH /todos/batch marks the listed todos active or complete. Body: `{ "ids": string[], "completed": boolean }`, both required. `ids` holds 1 to 100 well-formed UUIDs with no duplicates. Every listed todo is updated in one transaction, including todos that already match. Either every listed todo changes or none do.
+
+```
+curl -X PATCH http://localhost:3000/todos/batch \
+  -H "Content-Type: application/json" \
+  -d '{"ids": ["5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a"], "completed": true}'
+```
+
+Success: 200 with `{ "updatedCount": number }`, always equal to the number of ids. Failure: 400 with `{ "error": { "type": "validation", "issues": string[] } }` for an empty, oversized, duplicate, or malformed `ids`, or a missing or non-boolean `completed`, 409 with `{ "error": { "type": "batch_conflict", "missingIds": string[] } }` when any id matches no todo (nothing is changed), 500 with `{ "error": { "type": "internal" } }` for a server-side failure (nothing is changed).
+
 DELETE /todos/:todoId deletes a todo. No request body is read. This is a hard delete: the row is removed permanently, and a repeated delete of the same id is a 404, not a second 204.
 
 ```

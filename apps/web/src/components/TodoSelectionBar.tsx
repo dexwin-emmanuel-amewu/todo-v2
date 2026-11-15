@@ -1,5 +1,12 @@
+import type { UpdateSelectedTodosInput } from "@todo/contracts";
 import type { Ref } from "react";
 
+import {
+  getBatchErrorMessage,
+  getBatchPendingMessage,
+  getBatchResultMessage,
+  getBatchRetryIds,
+} from "../module/todo.batchCompletion";
 import {
   getSelectedCountLabel,
   getSelectionNoticeMessage,
@@ -11,7 +18,12 @@ const buttonClassName =
   "rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
 
 const doneClassName =
-  "rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900";
+  "rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
+
+const retryClassName =
+  "mt-2 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
+
+export type BatchResult = { updatedCount: number; completed: boolean };
 
 export function TodoSelectButton({
   locked,
@@ -48,6 +60,12 @@ export function TodoSelectionBar({
   onClear,
   onDone,
   pageButtonRef,
+  isPending,
+  input,
+  result,
+  error,
+  onMarkSelected,
+  onRetry,
 }: {
   selectedCount: number;
   pageState: SelectPageState;
@@ -57,9 +75,17 @@ export function TodoSelectionBar({
   onClear: () => void;
   onDone: () => void;
   pageButtonRef?: Ref<HTMLButtonElement>;
+  isPending: boolean;
+  input?: UpdateSelectedTodosInput;
+  result: BatchResult | null;
+  error: unknown;
+  onMarkSelected: (completed: boolean) => void;
+  onRetry: () => void;
 }) {
-  const pageUnavailable = pageState === "none";
-  const clearUnavailable = selectedCount === 0;
+  const pageUnavailable = isPending || pageState === "none";
+  const clearUnavailable = isPending || selectedCount === 0;
+  const markUnavailable = isPending || selectedCount === 0;
+  const retryIds = input ? getBatchRetryIds(error, input.ids) : [];
 
   return (
     <div
@@ -94,10 +120,52 @@ export function TodoSelectionBar({
         >
           Clear selection
         </button>
-        <button type="button" onClick={onDone} className={doneClassName}>
+        <button
+          type="button"
+          aria-disabled={isPending}
+          onClick={() => {
+            if (!isPending) onDone();
+          }}
+          className={doneClassName}
+        >
           Done
         </button>
       </div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {[true, false].map((completed) => (
+          <button
+            key={String(completed)}
+            type="button"
+            aria-disabled={markUnavailable}
+            onClick={() => {
+              if (!markUnavailable) onMarkSelected(completed);
+            }}
+            className={buttonClassName}
+          >
+            {completed ? "Mark selected as completed" : "Mark selected as active"}
+          </button>
+        ))}
+      </div>
+      <p role="status" aria-live="polite" className="mt-1 text-xs text-slate-600">
+        {isPending && input
+          ? getBatchPendingMessage({ count: input.ids.length, completed: input.completed })
+          : result
+            ? getBatchResultMessage(result)
+            : ""}
+      </p>
+      {!isPending && error != null && input && (
+        <div
+          role="alert"
+          className="mt-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+        >
+          <p>{getBatchErrorMessage(error, input.ids)}</p>
+          {retryIds.length > 0 && (
+            <button type="button" onClick={onRetry} className={retryClassName}>
+              Retry
+            </button>
+          )}
+        </div>
+      )}
       <p role="status" aria-live="polite" className="mt-1 text-xs text-slate-600">
         {getSelectionNoticeMessage(notice) ?? ""}
       </p>

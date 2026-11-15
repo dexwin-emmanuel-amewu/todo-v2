@@ -644,11 +644,27 @@ describe("TodoList", () => {
 });
 
 describe("TodoList in selection mode", () => {
+  it("locks the Select checkboxes while locked", async () => {
+    const onToggleRow = vi.fn();
+    render(
+      <TodoList
+        state={{ state: "ready", items }}
+        selection={{ selectedIds: new Set(), onToggleRow, locked: true }}
+      />,
+    );
+
+    const checkbox = screen.getByRole("checkbox", { name: "Select Buy oat milk" });
+    expect(checkbox).toHaveAttribute("aria-disabled", "true");
+    await userEvent.click(checkbox);
+    expect(onToggleRow).not.toHaveBeenCalled();
+    expect(checkbox).not.toBeChecked();
+  });
+
   it("renders one Select checkbox per row and no completion checkbox, Edit, or Delete", () => {
     render(
       <TodoList
         state={{ state: "ready", items }}
-        selection={{ selectedIds: new Set(), onToggleRow: vi.fn() }}
+        selection={{ selectedIds: new Set(), onToggleRow: vi.fn(), locked: false }}
       />,
     );
 
@@ -664,7 +680,7 @@ describe("TodoList in selection mode", () => {
     render(
       <TodoList
         state={{ state: "ready", items }}
-        selection={{ selectedIds: new Set([items[1].id]), onToggleRow: vi.fn() }}
+        selection={{ selectedIds: new Set([items[1].id]), onToggleRow: vi.fn(), locked: false }}
       />,
     );
 
@@ -682,7 +698,7 @@ describe("TodoList in selection mode", () => {
       <TodoList
         state={{ state: "ready", items }}
         completion={{ isPending: false, error: null, onToggle, onRetry: vi.fn() }}
-        selection={{ selectedIds: new Set(), onToggleRow }}
+        selection={{ selectedIds: new Set(), onToggleRow, locked: false }}
       />,
     );
 
@@ -697,7 +713,7 @@ describe("TodoList in selection mode", () => {
     render(
       <TodoList
         state={{ state: "ready", items }}
-        selection={{ selectedIds: new Set(), onToggleRow: vi.fn() }}
+        selection={{ selectedIds: new Set(), onToggleRow: vi.fn(), locked: false }}
       />,
     );
 

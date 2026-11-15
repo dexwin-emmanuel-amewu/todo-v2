@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  batchConflictErrorResponseSchema,
   clearCompletedTodosResponseSchema,
   notFoundErrorResponseSchema,
   patchTodoSchema,
@@ -10,6 +11,8 @@ import {
   todoSchema,
   todoSearchQuerySchema,
   todoStatusFilterSchema,
+  updateSelectedTodosResponseSchema,
+  updateSelectedTodosSchema,
 } from "./index";
 
 describe("todoSchema", () => {
@@ -253,5 +256,65 @@ describe("clearCompletedTodosResponseSchema", () => {
 
   it("rejects a body with no deletedCount", () => {
     expect(clearCompletedTodosResponseSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe("updateSelectedTodosSchema", () => {
+  const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const ids = (count: number) => Array.from({ length: count }, (_, n) => id(n));
+
+  it("accepts 1 id and 100 ids", () => {
+    expect(updateSelectedTodosSchema.safeParse({ ids: ids(1), completed: true }).success).toBe(
+      true,
+    );
+    expect(updateSelectedTodosSchema.safeParse({ ids: ids(100), completed: false }).success).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    ["no ids", { ids: [], completed: true }],
+    ["101 ids", { ids: ids(101), completed: true }],
+    ["a duplicate id", { ids: [id(1), id(1)], completed: true }],
+    ["a non-UUID id", { ids: ["not-a-uuid"], completed: true }],
+    ["a missing completed", { ids: ids(1) }],
+    ["a string completed", { ids: ids(1), completed: "true" }],
+    ["a non-object body", "ids"],
+  ])("rejects %s", (_, body) => {
+    expect(updateSelectedTodosSchema.safeParse(body).success).toBe(false);
+  });
+
+  it("names the duplicate issue", () => {
+    const result = updateSelectedTodosSchema.safeParse({ ids: [id(1), id(1)], completed: true });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.message)).toContain("ids must be unique");
+    }
+  });
+});
+
+describe("updateSelectedTodosResponseSchema", () => {
+  it("accepts a count from 1 to 100 and rejects 0", () => {
+    expect(updateSelectedTodosResponseSchema.safeParse({ updatedCount: 1 }).success).toBe(true);
+    expect(updateSelectedTodosResponseSchema.safeParse({ updatedCount: 100 }).success).toBe(true);
+    expect(updateSelectedTodosResponseSchema.safeParse({ updatedCount: 0 }).success).toBe(false);
+  });
+});
+
+describe("batchConflictErrorResponseSchema", () => {
+  it("accepts a conflict body and rejects an empty missingIds", () => {
+    const missing = "5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a";
+
+    expect(
+      batchConflictErrorResponseSchema.safeParse({
+        error: { type: "batch_conflict", missingIds: [missing] },
+      }).success,
+    ).toBe(true);
+    expect(
+      batchConflictErrorResponseSchema.safeParse({
+        error: { type: "batch_conflict", missingIds: [] },
+      }).success,
+    ).toBe(false);
   });
 });

@@ -36,6 +36,32 @@ export const setAllTodosCompletedResponseSchema = z.object({
 
 export type SetAllTodosCompletedResponse = z.infer<typeof setAllTodosCompletedResponseSchema>;
 
+export const updateSelectedTodosSchema = z.object({
+  ids: z
+    .array(z.uuid())
+    .min(1)
+    .max(100)
+    .refine((ids) => new Set(ids).size === ids.length, { message: "ids must be unique" }),
+  completed: z.boolean(),
+});
+
+export type UpdateSelectedTodosInput = z.infer<typeof updateSelectedTodosSchema>;
+
+export const updateSelectedTodosResponseSchema = z.object({
+  updatedCount: z.number().int().min(1).max(100),
+});
+
+export type UpdateSelectedTodosResponse = z.infer<typeof updateSelectedTodosResponseSchema>;
+
+export const batchConflictErrorResponseSchema = z.object({
+  error: z.object({
+    type: z.literal("batch_conflict"),
+    missingIds: z.array(z.uuid()).min(1),
+  }),
+});
+
+export type BatchConflictErrorResponse = z.infer<typeof batchConflictErrorResponseSchema>;
+
 export const clearCompletedTodosResponseSchema = z.object({
   deletedCount: z.number().int().min(0),
 });
