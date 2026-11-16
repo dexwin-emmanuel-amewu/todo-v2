@@ -16,7 +16,7 @@ const cardClassName = "rounded-lg border border-slate-200 bg-white shadow-sm";
 const messageClassName = "py-8 text-center text-sm text-slate-500";
 const alertClassName = "rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700";
 const retryClassName =
-  "mt-2 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900";
+  "mt-2 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
 
 type CompletionControls = {
   isPending: boolean;
@@ -215,7 +215,8 @@ function TodoListItem({
 
   async function saveDraft(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    if (replacement.isPending) return;
+    // A bulk action is running. Saving now would send stale values.
+    if (replacement.isPending || locked) return;
 
     const parsed = replaceTodoSchema.safeParse({ title: draft, completed: todo.completed });
     if (!parsed.success) {
@@ -311,6 +312,7 @@ function TodoListItem({
               <button
                 type="button"
                 disabled={isPending}
+                aria-disabled={locked || undefined}
                 onClick={() => void saveDraft()}
                 className={retryClassName}
               >
