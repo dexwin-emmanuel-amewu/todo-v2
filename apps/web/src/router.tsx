@@ -1,7 +1,7 @@
 import { createRoute, createRouter, redirect, type RouterHistory } from "@tanstack/react-router";
 
 import { getTodoListSearch } from "./module/todo.filter";
-import { getTodoListSearchLink } from "./module/todo.search";
+import { getTodoListPageLink } from "./module/todo.search";
 import { HomePage } from "./routes/index";
 import { rootRoute } from "./routes/root";
 
@@ -20,7 +20,7 @@ const indexRoute = createRoute({
       raw.page === search.page &&
       raw.pageSize === search.pageSize;
     if (!isCanonical) {
-      throw redirect({ to: "/", search: getTodoListSearchLink(search), replace: true });
+      throw redirect({ to: "/", search: getTodoListPageLink(search), replace: true });
     }
   },
   component: HomePage,

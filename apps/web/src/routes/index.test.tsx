@@ -84,6 +84,19 @@ function requestedUrls() {
   return mockFetch().mock.calls.map(([url]) => url as string);
 }
 
+// Records whether the empty message ever appears, even for one render.
+function watchForEmptyMessage() {
+  let seen = false;
+  const observer = new MutationObserver(() => {
+    if (/no todos/i.test(document.body.textContent ?? "")) seen = true;
+  });
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  return () => {
+    observer.disconnect();
+    return seen;
+  };
+}
+
 async function filterLink(name: string) {
   const nav = await screen.findByRole("navigation", { name: "Filter todos" });
   return within(nav).getByRole("link", { name });
@@ -797,13 +810,26 @@ describe("HomePage", () => {
       expect(router.state.location.href).toBe("/?page=2");
     });
 
+    it.each([
+      ["/?page=3&pageSize=20", "/?page=3"],
+      ["/?page=2&x=1", "/?page=2"],
+      ["/?page=02", "/?page=2"],
+    ])("keeps the page when rewriting %s", async (url, expected) => {
+      const router = createAppRouter(createMemoryHistory({ initialEntries: [url] }));
+
+      await router.load();
+
+      expect(router.state.location.href).toBe(expected);
+    });
+
     it("moves a page past the end to the last page without showing an empty message", async () => {
       respondByPage(() => 45);
+      const stopWatching = watchForEmptyMessage();
       const { router } = renderPage("/?page=9");
 
       expect(await screen.findByText("Page 3 of 3. Showing 41 to 45 of 45")).toBeInTheDocument();
       expect(router.state.location.href).toBe("/?page=3");
-      expect(screen.queryByText(/no todos/i)).not.toBeInTheDocument();
+      expect(stopWatching()).toBe(false);
       expect(requestedUrls()).toEqual(["/todos?page=9", "/todos?page=3"]);
     });
 
@@ -861,10 +887,15 @@ describe("HomePage", () => {
       await screen.findByText("Page 2 of 2. Showing 21 to 21 of 21");
 
       total = 20;
+      const stopWatching = watchForEmptyMessage();
       await userEvent.click(screen.getByRole("button", { name: "Delete Task 21" }));
 
       expect(await screen.findByText("Task 20")).toBeInTheDocument();
       await waitFor(() => expect(router.state.location.href).toBe("/"));
+      expect(stopWatching()).toBe(false);
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Delete Task 20" })).toHaveFocus(),
+      );
       expect(screen.queryByRole("navigation", { name: "Pagination" })).toBeInTheDocument();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });

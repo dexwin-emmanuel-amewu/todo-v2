@@ -126,4 +126,23 @@ describe("TodoFilters", () => {
     expect(links.active).toHaveAttribute("aria-current", "page");
     expect(links.all).not.toHaveAttribute("aria-current");
   });
+
+  it.each([
+    ["/?page=2", "all"],
+    ["/?status=active&page=2", "active"],
+  ] as const)("keeps the selected filter on %s", async (url, selected) => {
+    renderFilters(url);
+
+    const links = await filterLinks();
+
+    for (const [name, link] of Object.entries(links)) {
+      if (name === selected) {
+        expect(link).toHaveAttribute("aria-current", "page");
+        expect(link).toHaveClass("bg-slate-900");
+      } else {
+        expect(link).not.toHaveAttribute("aria-current");
+        expect(link).not.toHaveClass("bg-slate-900");
+      }
+    }
+  });
 });
