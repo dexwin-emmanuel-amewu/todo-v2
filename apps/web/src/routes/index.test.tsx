@@ -185,6 +185,15 @@ function fakeServer(initial: ServerTodo[]) {
   };
 }
 
+// Every later request fails, as in a server or network outage.
+function takeServerDown() {
+  const down = async () => {
+    throw new TypeError("Failed to fetch");
+  };
+  mockFetch().mockImplementation(down);
+  summaryFetch.mockImplementation(down);
+}
+
 function listGetCount() {
   return mockFetch().mock.calls.filter(([, init]) => (init?.method ?? "GET") === "GET").length;
 }
@@ -1176,6 +1185,78 @@ describe("HomePage", () => {
       await userEvent.click(toggleAll);
       expect(server.patchBodies).toHaveLength(0);
     });
+    it("keeps the control and its alert when the request and the refetch both fail", async () => {
+      fakeServer(makeTodos(3, () => false));
+
+      renderPage();
+      const checkbox = await screen.findByRole("checkbox", {
+        name: "Mark all 3 todos as completed",
+      });
+      takeServerDown();
+      await userEvent.click(checkbox);
+
+      const message = await screen.findByText(
+        "Could not reach the server. Your todos were not changed.",
+      );
+      const alert = message.closest("[role=alert]") as HTMLElement;
+      expect(within(alert).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+      expect(checkbox).toBeInTheDocument();
+      expect(checkbox).toHaveFocus();
+    });
+
+    it("keeps keyboard focus on the checkbox when a retry fails again", async () => {
+      const server = fakeServer(makeTodos(3, () => false));
+      server.failPatchWith(async () => jsonResponse({ error: { type: "internal" } }, 500));
+
+      renderPage();
+      const checkbox = await screen.findByRole("checkbox", {
+        name: "Mark all 3 todos as completed",
+      });
+      await userEvent.click(checkbox);
+      within(await screen.findByRole("alert"))
+        .getByRole("button", { name: "Retry" })
+        .focus();
+      await userEvent.keyboard("{Enter}");
+
+      expect(checkbox).toHaveFocus();
+      await waitFor(() => expect(server.patchBodies).toHaveLength(2));
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      expect(checkbox).toHaveFocus();
+    });
+
+    it("blocks saving an open editor while the request is pending", async () => {
+      const server = fakeServer(makeTodos(3, () => false));
+      let release: () => void = () => {};
+      server.failPatchWith(
+        () =>
+          new Promise((resolve) => {
+            release = () => {
+              for (const todo of server.state.items) todo.completed = true;
+              resolve(jsonResponse({ updatedCount: 3 }));
+            };
+          }),
+      );
+
+      renderPage();
+      await userEvent.click(await screen.findByRole("button", { name: "Edit Todo number 1" }));
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Mark all 3 todos as completed" }),
+      );
+      await screen.findByText("Marking all todos as completed");
+
+      const save = screen.getByRole("button", { name: "Save" });
+      expect(save).toHaveAttribute("aria-disabled", "true");
+      await userEvent.click(save);
+      await userEvent.type(
+        screen.getByRole("textbox", { name: "Edit title for Todo number 1" }),
+        "{Enter}",
+      );
+      expect(mockFetch().mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
+
+      release();
+      expect(await screen.findByText("Marked 3 todos as completed.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save" })).not.toHaveAttribute("aria-disabled");
+    });
   });
   describe("clear completed", () => {
     function clearButton(name: string | RegExp = /^Clear (all|the)/) {
@@ -1418,6 +1499,67 @@ describe("HomePage", () => {
       await waitFor(() => expect(button).toHaveAttribute("aria-disabled", "true"));
       await userEvent.click(button);
       expect(server.deleteUrls).toHaveLength(0);
+    });
+
+    it("keeps the button and its alert when the request and the refetch both fail", async () => {
+      fakeServer(makeTodos(3, (index) => index === 0));
+
+      renderPage();
+      const button = await clearButton("Clear the 1 completed todo");
+      takeServerDown();
+      await userEvent.click(button);
+
+      const message = await screen.findByText(
+        "Could not reach the server. Check your connection and try again.",
+      );
+      const alert = message.closest("[role=alert]") as HTMLElement;
+      expect(within(alert).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+      expect(button).toHaveFocus();
+    });
+
+    it("announces the result when the clear works but the refetch fails", async () => {
+      const server = fakeServer(makeTodos(3, (index) => index === 0));
+      server.failDeleteWith(async () => {
+        takeServerDown();
+        return jsonResponse({ deletedCount: 1 });
+      });
+
+      renderPage();
+      await userEvent.click(await clearButton("Clear the 1 completed todo"));
+
+      expect(await screen.findByText("Cleared 1 completed todo.")).toBeInTheDocument();
+    });
+
+    it("keeps keyboard focus on the button when a retry fails again", async () => {
+      const server = fakeServer(makeTodos(3, (index) => index === 0));
+      server.failDeleteWith(async () => jsonResponse({ error: { type: "internal" } }, 500));
+
+      renderPage();
+      const button = await clearButton("Clear the 1 completed todo");
+      await userEvent.click(button);
+      within(await screen.findByRole("alert"))
+        .getByRole("button", { name: "Retry" })
+        .focus();
+      await userEvent.keyboard("{Enter}");
+
+      expect(button).toHaveFocus();
+      await waitFor(() => expect(server.deleteUrls).toHaveLength(2));
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      expect(button).toHaveFocus();
+    });
+
+    it("blocks saving an open editor while the request is pending", async () => {
+      const server = fakeServer(makeTodos(3, (index) => index === 0));
+      server.failDeleteWith(() => new Promise<Response>(() => {}));
+
+      renderPage();
+      await userEvent.click(await screen.findByRole("button", { name: "Edit Todo number 1" }));
+      await userEvent.click(await clearButton("Clear the 1 completed todo"));
+
+      const save = await screen.findByRole("button", { name: "Save" });
+      await waitFor(() => expect(save).toHaveAttribute("aria-disabled", "true"));
+      await userEvent.click(save);
+      expect(mockFetch().mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
     });
   });
 });

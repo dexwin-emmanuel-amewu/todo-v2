@@ -195,7 +195,8 @@ export function HomePage() {
       <CreateTodoForm />
       <TodoSearch value={search} onCommit={commitSearch} inputRef={searchInputRef} />
       <TodoFilters />
-      {summaryQuery.isSuccess && toggleAll?.state === "visible" && (
+      {/* Use data, not isSuccess: a failed refetch keeps the last summary and must not hide the alert. */}
+      {toggleAll?.state === "visible" && (
         <TodoToggleAll
           totalCount={toggleAll.totalCount}
           checked={toggleAll.checked}
@@ -219,6 +220,8 @@ export function HomePage() {
               !rowMutationPending &&
               !clearMutation.isPending
             ) {
+              // Retry unmounts with the alert, so keep keyboard focus on the checkbox.
+              toggleAllInputRef.current?.focus();
               toggleAllMutation.mutate(completed);
             }
           }}
@@ -240,7 +243,7 @@ export function HomePage() {
         bulkPending={bulkPending}
         emptyHeadingRef={emptyHeadingRef}
       />
-      {summaryQuery.isSuccess && (
+      {summaryQuery.data && (
         <TodoClearCompleted
           completedCount={clearState.state === "visible" ? clearState.completedCount : 0}
           scoped={filter !== "all" || Boolean(search)}
@@ -249,7 +252,11 @@ export function HomePage() {
           deletedCount={clearMutation.isSuccess ? clearMutation.data.deletedCount : null}
           error={clearMutation.error}
           onClear={startClear}
-          onRetry={startClear}
+          onRetry={() => {
+            // Retry unmounts with the alert, so keep keyboard focus on the button.
+            clearButtonRef.current?.focus();
+            startClear();
+          }}
           buttonRef={clearButtonRef}
         />
       )}
