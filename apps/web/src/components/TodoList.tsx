@@ -278,6 +278,7 @@ function TodoListItem({
           <input
             type="checkbox"
             checked={selection.selectedIds.has(todo.id)}
+            disabled={locked}
             aria-label={`Select ${todo.title}`}
             onChange={() => selection.onToggleRow(todo.id)}
             className="size-4 shrink-0 accent-sky-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
