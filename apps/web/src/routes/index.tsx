@@ -105,9 +105,6 @@ export function HomePage() {
   const pendingSelectionFocus = useRef<"page_button" | "select_button" | "empty_heading" | null>(
     null,
   );
-  const lastSettledTotal = useRef<{ status: string; search?: string; totalItems: number } | null>(
-    null,
-  );
 
   const queryState = getTodoListViewState({
     status: query.status,
@@ -168,9 +165,11 @@ export function HomePage() {
       : null;
 
   const selecting = selection.mode === "on";
-  const visibleIds = "items" in state ? state.items.map((todo) => todo.id) : [];
+  // Placeholder rows belong to the previous view, so they cannot be selected.
+  const loadingView = queryState.state === "loading_query";
+  const visibleIds = "items" in state && !loadingView ? state.items.map((todo) => todo.id) : [];
   const selectedIds = selecting ? selection.selectedIds : new Set<string>();
-  const selectLocked = rowMutationPending || bulkPending;
+  const selectLocked = rowMutationPending || bulkPending || loadingView;
   const showSelectButton =
     !selecting &&
     redirectPage === undefined &&
@@ -185,30 +184,31 @@ export function HomePage() {
     dispatchSelection({ type: "scope_changed", scope: { status: filter, search } });
   }, [filter, search]);
 
-  // A view that had todos and refetches empty ends selection mode.
+  // A settled empty result for the current view ends selection mode.
+  const settledEmpty = settled?.totalItems === 0;
   useEffect(() => {
-    if (!settled) return;
-    const previous = lastSettledTotal.current;
-    lastSettledTotal.current = { status: filter, search, totalItems: settled.totalItems };
-    const sameView = previous?.status === filter && previous.search === search;
-    if (selecting && sameView && previous.totalItems > 0 && settled.totalItems === 0) {
-      pendingSelectionFocus.current = "empty_heading";
-      dispatchSelection({ type: "list_emptied" });
-    }
-  }, [settled, filter, search, selecting]);
+    if (!selecting || !settledEmpty) return;
+    pendingSelectionFocus.current = "empty_heading";
+    dispatchSelection({ type: "list_emptied" });
+  }, [selecting, settledEmpty]);
 
+  // A focus request lives for one render only.
   useLayoutEffect(() => {
     const target = pendingSelectionFocus.current;
     if (!target) return;
+    pendingSelectionFocus.current = null;
+
+    // Clear keeps focus on its own button. Other requests only take focus that was lost.
+    const active = document.activeElement;
+    if (target !== "page_button" && active && active !== document.body) return;
+
     const element =
       target === "page_button"
         ? selectPageButtonRef.current
         : target === "select_button"
-          ? selectButtonRef.current
+          ? (selectButtonRef.current ?? emptyHeadingRef.current)
           : emptyHeadingRef.current;
-    if (!element) return;
-    pendingSelectionFocus.current = null;
-    element.focus();
+    element?.focus();
   });
 
   const enterSelection = () => {

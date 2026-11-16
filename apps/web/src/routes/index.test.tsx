@@ -1679,6 +1679,106 @@ describe("HomePage selection mode", () => {
     expect(screen.queryByRole("group", { name: "Selection" })).not.toBeInTheDocument();
   });
 
+  function holdFilter(server: ReturnType<typeof fakeServer>, status: string) {
+    const held = { release: () => {} };
+    mockFetch().mockImplementation((url: string, init?: RequestInit) =>
+      url.includes(`status=${status}`)
+        ? new Promise<Response>((resolve) => {
+            held.release = () => void server.handle(url, init).then(resolve);
+          })
+        : server.handle(url, init),
+    );
+    return held;
+  }
+
+  it("locks Select todos while a new filter loads", async () => {
+    const server = fakeServer(makeTodos(4, (index) => index < 2));
+    const held = holdFilter(server, "active");
+
+    renderPage();
+    const selectButton = await screen.findByRole("button", { name: "Select todos" });
+    await userEvent.click(await filterLink("Active"));
+    await waitFor(() => expect(selectButton).toHaveAttribute("aria-disabled", "true"));
+    await userEvent.click(selectButton);
+    expect(screen.queryByRole("group", { name: "Selection" })).not.toBeInTheDocument();
+
+    held.release();
+    await waitFor(() => expect(selectButton).toHaveAttribute("aria-disabled", "false"));
+  });
+
+  it("does not let rows from the previous view be selected while a new filter loads", async () => {
+    const server = fakeServer(makeTodos(4, (index) => index < 2));
+    const held = holdFilter(server, "active");
+
+    renderPage();
+    const group = await enterSelection();
+    await userEvent.click(await filterLink("Active"));
+
+    const completedRow = screen.getByRole("checkbox", { name: "Select Todo number 1" });
+    await waitFor(() => expect(completedRow).toBeDisabled());
+    const selectPage = within(group).getByRole("button", { name: "Select this page" });
+    expect(selectPage).toHaveAttribute("aria-disabled", "true");
+    await userEvent.click(selectPage);
+    expect(countText(group)).toHaveTextContent("0 selected");
+
+    held.release();
+    await waitFor(() =>
+      expect(screen.queryByRole("checkbox", { name: "Select Todo number 1" })).toBeNull(),
+    );
+    expect(countText(group)).toHaveTextContent("0 selected");
+    expect(screen.getByRole("checkbox", { name: "Select Todo number 3" })).toBeEnabled();
+  });
+
+  it("exits when a filter change leads to an empty list", async () => {
+    fakeServer(makeTodos(2, () => false));
+
+    renderPage();
+    await enterSelection();
+    await userEvent.click(await filterLink("Completed"));
+
+    expect(await screen.findByRole("heading", { name: "No completed todos." })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("group", { name: "Selection" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("exits when a search change leads to no matches", async () => {
+    const server = fakeServer(makeTodos(2, () => false));
+    mockFetch().mockImplementation((url: string, init?: RequestInit) =>
+      url.includes("search=")
+        ? Promise.resolve(jsonResponse(listBody([])))
+        : server.handle(url, init),
+    );
+
+    const { router } = renderPage();
+    await enterSelection();
+    await router.navigate({ to: "/", search: { search: "zzz" } });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("group", { name: "Selection" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it("drops the focus request after Done when Select todos is missing", async () => {
+    const server = fakeServer(makeTodos(2, () => false));
+
+    const { queryClient } = renderPage();
+    const group = await enterSelection();
+    mockFetch().mockRejectedValue(new TypeError("Failed to fetch"));
+    await queryClient.invalidateQueries();
+    await screen.findByText(/could not refresh your todos/i);
+    await userEvent.click(within(group).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("button", { name: "Select todos" })).not.toBeInTheDocument();
+
+    mockFetch().mockImplementation(server.handle);
+    const input = screen.getByRole("textbox", { name: "Todo title" });
+    await userEvent.type(input, "Draft");
+    await queryClient.invalidateQueries();
+
+    await screen.findByRole("button", { name: "Select todos" });
+    expect(input).toHaveFocus();
+  });
+
   it("keeps the bar and its Done button when the list fails to refresh", async () => {
     fakeServer(makeTodos(2, () => false));
 
