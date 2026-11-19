@@ -1,5 +1,6 @@
 import {
   createTodoSchema,
+  deleteSelectedTodosSchema,
   patchTodoSchema,
   replaceTodoSchema,
   setAllTodosCompletedSchema,
@@ -17,6 +18,7 @@ import type {
 import {
   createTodo,
   type Db,
+  deleteSelectedTodos,
   patchTodoById,
   replaceTodoById,
   setAllTodosCompleted,
@@ -108,4 +110,23 @@ export function updateSelectedTodosService(
   }
 
   return updateSelectedTodos(db, parsed.data.ids, parsed.data.completed);
+}
+
+export function deleteSelectedTodosService(
+  db: Db,
+  rawInput: unknown,
+): ResultAsync<
+  { deletedCount: number },
+  RequestValidationError | BatchConflictError | DatabaseError
+> {
+  const parsed = deleteSelectedTodosSchema.safeParse(rawInput);
+
+  if (!parsed.success) {
+    return errAsync({
+      type: "request_validation",
+      issues: parsed.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  return deleteSelectedTodos(db, parsed.data.ids);
 }

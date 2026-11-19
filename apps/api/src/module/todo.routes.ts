@@ -1,6 +1,7 @@
 import {
   type BatchConflictErrorResponse,
   type ClearCompletedTodosResponse,
+  type DeleteSelectedTodosResponse,
   type InternalErrorResponse,
   type NotFoundErrorResponse,
   type SetAllTodosCompletedResponse,
@@ -9,6 +10,7 @@ import {
   type TodoStatusFilter,
   type UpdateSelectedTodosResponse,
   clearCompletedTodosResponseSchema,
+  deleteSelectedTodosResponseSchema,
   setAllTodosCompletedResponseSchema,
   todoIdParamSchema,
   todoListResponseSchema,
@@ -34,6 +36,7 @@ import type { Db, PaginatedTodos, TodoPagination } from "./todo.repository.js";
 import { deleteCompletedTodos, deleteTodoById, getTodoById, listTodos } from "./todo.repository.js";
 import {
   createTodoService,
+  deleteSelectedTodosService,
   patchTodoService,
   replaceTodoService,
   type RequestValidationError,
@@ -383,6 +386,42 @@ export function toUpdateSelectedTodosResponse(
     .exhaustive();
 }
 
+type DeleteSelectedTodosRouteResponse =
+  | { status: 200; body: DeleteSelectedTodosResponse }
+  | { status: 400; body: { error: { type: "validation"; issues: string[] } } }
+  | { status: 409; body: BatchConflictErrorResponse }
+  | { status: 500; body: InternalErrorResponse };
+
+export function toDeleteSelectedTodosResponse(
+  result: Result<
+    { deletedCount: number },
+    RequestValidationError | BatchConflictError | DatabaseError
+  >,
+): DeleteSelectedTodosRouteResponse {
+  if (result.isOk()) {
+    const validated = deleteSelectedTodosResponseSchema.safeParse(result.value);
+
+    return validated.success
+      ? { status: 200, body: validated.data }
+      : { status: 500, body: internalErrorBody };
+  }
+
+  return match(result.error)
+    .with({ type: "request_validation" }, ({ issues }): DeleteSelectedTodosRouteResponse => ({
+      status: 400,
+      body: { error: { type: "validation", issues } },
+    }))
+    .with({ type: "batch_conflict" }, ({ missingIds }): DeleteSelectedTodosRouteResponse => ({
+      status: 409,
+      body: { error: { type: "batch_conflict", missingIds } },
+    }))
+    .with({ type: "database" }, (): DeleteSelectedTodosRouteResponse => ({
+      status: 500,
+      body: internalErrorBody,
+    }))
+    .exhaustive();
+}
+
 type ClearCompletedTodosRouteResponse =
   | { status: 200; body: ClearCompletedTodosResponse }
   | { status: 400; body: { error: { type: "validation"; issues: string[] } } }
@@ -509,6 +548,17 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
     }
 
     const { status, body } = toUpdateSelectedTodosResponse(result);
+    return reply.status(status).send(body);
+  });
+
+  app.post("/todos/batch-delete", async (request, reply) => {
+    const result = await deleteSelectedTodosService(db, request.body);
+
+    if (result.isErr() && result.error.type === "database") {
+      request.log.error({ err: result.error }, "POST /todos/batch-delete failed");
+    }
+
+    const { status, body } = toDeleteSelectedTodosResponse(result);
     return reply.status(status).send(body);
   });
 

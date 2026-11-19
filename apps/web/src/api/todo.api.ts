@@ -2,6 +2,10 @@ import {
   batchConflictErrorResponseSchema,
   type ClearCompletedTodosResponse,
   clearCompletedTodosResponseSchema,
+  type DeleteSelectedTodosInput,
+  type DeleteSelectedTodosResponse,
+  deleteSelectedTodosResponseSchema,
+  deleteSelectedTodosSchema,
   type Todo,
   type TodoListResponse,
   type TodoStatusFilter,
@@ -189,24 +193,23 @@ export async function setAllTodosCompleted(
   return parsed.data;
 }
 
-export async function updateSelectedTodos(
-  input: UpdateSelectedTodosInput,
-): Promise<UpdateSelectedTodosResponse> {
-  const parsedBody = updateSelectedTodosSchema.safeParse(input);
-
-  if (!parsedBody.success) {
-    throw new TodoApiError("request_validation", "The selected todos request was invalid.", {
-      issues: parsedBody.error.issues.map((issue) => issue.message),
-    });
-  }
-
+async function sendBatchRequest<T>(
+  path: string,
+  method: "PATCH" | "POST",
+  input: unknown,
+  responseSchema: {
+    safeParse: (
+      value: unknown,
+    ) => { success: true; data: T } | { success: false; error: { issues: { message: string }[] } };
+  },
+): Promise<T> {
   let response: Response;
 
   try {
-    response = await fetch(`${TODO_API_BASE_URL}/todos/batch`, {
-      method: "PATCH",
+    response = await fetch(`${TODO_API_BASE_URL}${path}`, {
+      method,
       headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify(parsedBody.data),
+      body: JSON.stringify(input),
     });
   } catch (cause) {
     throw new TodoApiError("network", "Could not reach the API.", { cause });
@@ -243,7 +246,7 @@ export async function updateSelectedTodos(
     });
   }
 
-  const parsed = updateSelectedTodosResponseSchema.safeParse(body);
+  const parsed = responseSchema.safeParse(body);
 
   if (!parsed.success) {
     throw new TodoApiError("response_validation", "The API response did not match the contract.", {
@@ -252,6 +255,44 @@ export async function updateSelectedTodos(
   }
 
   return parsed.data;
+}
+
+export async function updateSelectedTodos(
+  input: UpdateSelectedTodosInput,
+): Promise<UpdateSelectedTodosResponse> {
+  const parsedBody = updateSelectedTodosSchema.safeParse(input);
+
+  if (!parsedBody.success) {
+    throw new TodoApiError("request_validation", "The selected todos request was invalid.", {
+      issues: parsedBody.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  return sendBatchRequest(
+    "/todos/batch",
+    "PATCH",
+    parsedBody.data,
+    updateSelectedTodosResponseSchema,
+  );
+}
+
+export async function deleteSelectedTodos(
+  input: DeleteSelectedTodosInput,
+): Promise<DeleteSelectedTodosResponse> {
+  const parsedBody = deleteSelectedTodosSchema.safeParse(input);
+
+  if (!parsedBody.success) {
+    throw new TodoApiError("request_validation", "The delete selected request was invalid.", {
+      issues: parsedBody.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  return sendBatchRequest(
+    "/todos/batch-delete",
+    "POST",
+    parsedBody.data,
+    deleteSelectedTodosResponseSchema,
+  );
 }
 
 export async function clearCompletedTodos(): Promise<ClearCompletedTodosResponse> {
