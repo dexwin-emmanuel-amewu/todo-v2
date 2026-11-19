@@ -170,6 +170,32 @@ export function updateSelectedTodos(
   ).map((updatedCount) => ({ updatedCount }));
 }
 
+export function deleteSelectedTodos(
+  db: Db,
+  ids: readonly string[],
+): ResultAsync<{ deletedCount: number }, BatchConflictError | DatabaseError> {
+  let missingIds: string[] = [];
+
+  return ResultAsync.fromPromise(
+    db.transaction(async (tx) => {
+      const rows = await tx
+        .delete(todos)
+        .where(inArray(todos.id, [...ids]))
+        .returning({ id: todos.id });
+
+      if (rows.length !== ids.length) {
+        const found = new Set(rows.map((row) => row.id));
+        missingIds = ids.filter((id) => !found.has(id));
+        tx.rollback();
+      }
+
+      return rows.length;
+    }),
+    (cause): BatchConflictError | DatabaseError =>
+      missingIds.length > 0 ? { type: "batch_conflict", missingIds } : toDatabaseError(cause),
+  ).map((deletedCount) => ({ deletedCount }));
+}
+
 export type TodoPagination = { page: number; pageSize: number };
 
 export type PaginatedTodos = {

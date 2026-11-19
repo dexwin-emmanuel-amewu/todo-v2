@@ -97,6 +97,16 @@ curl -X PATCH http://localhost:3000/todos/batch \
 
 Success: 200 with `{ "updatedCount": number }`, always equal to the number of ids. Failure: 400 with `{ "error": { "type": "validation", "issues": string[] } }` for an empty, oversized, duplicate, or malformed `ids`, or a missing or non-boolean `completed`, 409 with `{ "error": { "type": "batch_conflict", "missingIds": string[] } }` when any id matches no todo (nothing is changed), 500 with `{ "error": { "type": "internal" } }` for a server-side failure (nothing is changed).
 
+POST /todos/batch-delete deletes the listed todos. Body: `{ "ids": string[] }`, required. `ids` holds 1 to 100 well-formed UUIDs with no duplicates. Every listed todo is deleted in one transaction. Either every listed todo is deleted or none are. This is a hard delete, so a repeated request returns 409.
+
+```
+curl -X POST http://localhost:3000/todos/batch-delete \
+  -H "Content-Type: application/json" \
+  -d '{"ids": ["5d1c3b2a-6b1a-4b9a-9b1a-6b1a4b9a9b1a"]}'
+```
+
+Success: 200 with `{ "deletedCount": number }`, always equal to the number of ids. Failure: 400 with `{ "error": { "type": "validation", "issues": string[] } }` for a missing, empty, oversized, duplicate, or malformed `ids`, 409 with `{ "error": { "type": "batch_conflict", "missingIds": string[] } }` when any id matches no todo (nothing is deleted), 500 with `{ "error": { "type": "internal" } }` for a server-side failure (nothing is deleted).
+
 DELETE /todos/:todoId deletes a todo. No request body is read. This is a hard delete: the row is removed permanently, and a repeated delete of the same id is a 404, not a second 204.
 
 ```

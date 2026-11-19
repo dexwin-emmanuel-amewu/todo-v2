@@ -10,6 +10,7 @@ import { TodoSelectButton, TodoSelectionBar } from "../components/TodoSelectionB
 import { TodoToggleAll } from "../components/TodoToggleAll";
 import { CreateTodoForm } from "../components/CreateTodoForm";
 import { useClearCompletedTodosMutation } from "../hooks/useClearCompletedTodosMutation";
+import { useDeleteSelectedTodosMutation } from "../hooks/useDeleteSelectedTodosMutation";
 import { usePatchTodoCompletionMutation } from "../hooks/usePatchTodoCompletionMutation";
 import { useDeleteTodoMutation } from "../hooks/useDeleteTodoMutation";
 import { useReplaceTodoMutation } from "../hooks/useReplaceTodoMutation";
@@ -73,7 +74,6 @@ export function HomePage() {
       }),
     });
 
-  // A page past the end, or a page above 1 on an empty list, moves to the last valid page.
   const settled = query.isPlaceholderData ? undefined : query.data;
   const redirectPage = settled
     ? getPageRedirect({ page, totalPages: settled.totalPages, totalItems: settled.totalItems })
@@ -98,7 +98,10 @@ export function HomePage() {
   const toggleAllMutation = useSetAllTodosCompletedMutation();
   const clearMutation = useClearCompletedTodosMutation();
   const batchMutation = useUpdateSelectedTodosMutation();
-  const resetBatch = batchMutation.reset;
+  const deleteSelectedMutation = useDeleteSelectedTodosMutation();
+  const resetMark = batchMutation.reset;
+  const resetDelete = deleteSelectedMutation.reset;
+  const batchPending = batchMutation.isPending || deleteSelectedMutation.isPending;
   const toggleAllInputRef = useRef<HTMLInputElement>(null);
   const clearButtonRef = useRef<HTMLButtonElement>(null);
   const emptyHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -191,13 +194,12 @@ export function HomePage() {
     query.data !== undefined &&
     query.data.totalItems > 0;
 
-  // The selection belongs to one status and one search. Paging keeps it.
   useEffect(() => {
     dispatchSelection({ type: "scope_changed", scope: { status: filter, search } });
-    resetBatch();
-  }, [filter, search, resetBatch]);
+    resetMark();
+    resetDelete();
+  }, [filter, search, resetMark, resetDelete]);
 
-  // A view that had todos and refetches empty ends selection mode.
   useEffect(() => {
     if (!settled) return;
     const previous = lastSettledTotal.current;
@@ -229,19 +231,37 @@ export function HomePage() {
     dispatchSelection({ type: "enter", scope: { status: filter, search } });
   };
   const exitSelection = () => {
-    if (batchMutation.isPending) return;
+    if (batchPending) return;
     pendingSelectionFocus.current = "select_button";
-    resetBatch();
+    resetMark();
+    resetDelete();
     dispatchSelection({ type: "exit" });
   };
   const markSelected = (ids: string[], completed: boolean) => {
-    if (batchMutation.isPending || ids.length === 0) return;
-    // Pessimistic: rows change only after the server answers and the list refetches.
+    if (batchPending || ids.length === 0) return;
+    resetDelete();
     batchMutation.mutate(
       { ids, completed },
       {
         onSuccess: () => {
-          // An emptied list has already moved focus to the empty heading.
+          pendingSelectionFocus.current ??= "page_button";
+          dispatchSelection({ type: "clear" });
+        },
+        onError: (error) => {
+          const retryIds = new Set(getBatchRetryIds(error, ids));
+          const missingIds = ids.filter((id) => !retryIds.has(id));
+          if (missingIds.length > 0) dispatchSelection({ type: "remove_ids", ids: missingIds });
+        },
+      },
+    );
+  };
+  const deleteSelected = (ids: string[]) => {
+    if (batchPending || ids.length === 0) return;
+    resetMark();
+    deleteSelectedMutation.mutate(
+      { ids },
+      {
+        onSuccess: () => {
           pendingSelectionFocus.current ??= "page_button";
           dispatchSelection({ type: "clear" });
         },
@@ -270,11 +290,9 @@ export function HomePage() {
     clearMutation.mutate();
   };
 
-  // After a clear settles, move focus off the button that just disappeared.
   useLayoutEffect(() => {
     if (!pendingClearFocus.current || clearMutation.isPending || clearMutation.isIdle) return;
 
-    // The refetch has run. A button that is still shown keeps focus.
     if (clearButtonRef.current) {
       pendingClearFocus.current = false;
       return;
@@ -290,7 +308,6 @@ export function HomePage() {
       summaryQuery.data && summaryQuery.data.totalCount > 0
         ? toggleAllInputRef.current
         : emptyHeadingRef.current;
-    // The target can be missing during a page redirect. Wait for the next render.
     if (!target) return;
 
     pendingClearFocus.current = false;
@@ -320,12 +337,13 @@ export function HomePage() {
             onUnselectPage={() => dispatchSelection({ type: "unselect_page", ids: visibleIds })}
             onClear={() => {
               pendingSelectionFocus.current = "page_button";
-              resetBatch();
+              resetMark();
+              resetDelete();
               dispatchSelection({ type: "clear" });
             }}
             onDone={exitSelection}
             pageButtonRef={selectPageButtonRef}
-            isPending={batchMutation.isPending}
+            isPending={batchPending}
             input={batchMutation.variables}
             result={batchResult}
             error={batchMutation.error}
@@ -334,6 +352,16 @@ export function HomePage() {
               const input = batchMutation.variables;
               if (input)
                 markSelected(getBatchRetryIds(batchMutation.error, input.ids), input.completed);
+            }}
+            deleteInput={deleteSelectedMutation.variables}
+            deleteResult={
+              deleteSelectedMutation.isSuccess ? deleteSelectedMutation.data.deletedCount : null
+            }
+            deleteError={deleteSelectedMutation.error}
+            onDeleteSelected={() => deleteSelected([...selection.selectedIds])}
+            onRetryDelete={() => {
+              const input = deleteSelectedMutation.variables;
+              if (input) deleteSelected(getBatchRetryIds(deleteSelectedMutation.error, input.ids));
             }}
           />
         )}
@@ -386,7 +414,7 @@ export function HomePage() {
               ? {
                   selectedIds,
                   onToggleRow: (todoId) => dispatchSelection({ type: "toggle_row", id: todoId }),
-                  locked: batchMutation.isPending,
+                  locked: batchPending,
                 }
               : undefined
           }

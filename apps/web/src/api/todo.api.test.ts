@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearCompletedTodos,
   createTodo,
+  deleteSelectedTodos,
   deleteTodo,
   fetchTodoList,
   fetchTodoSummary,
@@ -668,5 +669,74 @@ describe("updateSelectedTodos", () => {
     const input = { ids: [todo.id], completed: true };
     await expect(updateSelectedTodos(input)).rejects.toMatchObject({ type: "response_validation" });
     await expect(updateSelectedTodos(input)).rejects.toMatchObject({ type: "response_validation" });
+  });
+});
+
+describe("deleteSelectedTodos", () => {
+  const otherId = "6e2d4c3b-7c2b-4cab-8c2b-7c2b5cab8c2b";
+
+  it("sends one POST to the batch-delete path with the ids", async () => {
+    mockFetch().mockResolvedValue(jsonResponse({ deletedCount: 2 }));
+
+    await expect(deleteSelectedTodos({ ids: [todo.id, otherId] })).resolves.toEqual({
+      deletedCount: 2,
+    });
+
+    expect(mockFetch()).toHaveBeenCalledTimes(1);
+    const [url, init] = mockFetch().mock.calls[0];
+    expect(url).toBe("/todos/batch-delete");
+    expect(init).toMatchObject({
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [todo.id, otherId] }),
+    });
+  });
+
+  it("rejects bad input with a request_validation error and makes no request", async () => {
+    await expect(deleteSelectedTodos({ ids: [] })).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    await expect(deleteSelectedTodos({ ids: [todo.id, todo.id] })).rejects.toMatchObject({
+      type: "request_validation",
+    });
+    expect(mockFetch()).not.toHaveBeenCalled();
+  });
+
+  it("rejects a 409 with a batch_conflict error that carries the missing ids", async () => {
+    mockFetch().mockResolvedValue(
+      jsonResponse({ error: { type: "batch_conflict", missingIds: [otherId] } }, 409),
+    );
+
+    const error = await deleteSelectedTodos({ ids: [todo.id, otherId] }).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(TodoApiError);
+    expect(error).toMatchObject({ type: "batch_conflict", status: 409, missingIds: [otherId] });
+  });
+
+  it("rejects with an http error on a 400 or a 500", async () => {
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse({ error: { type: "validation", issues: [] } }, 400))
+      .mockResolvedValueOnce(jsonResponse({ error: { type: "internal" } }, 500));
+
+    const input = { ids: [todo.id] };
+    await expect(deleteSelectedTodos(input)).rejects.toMatchObject({ type: "http", status: 400 });
+    await expect(deleteSelectedTodos(input)).rejects.toMatchObject({ type: "http", status: 500 });
+  });
+
+  it("rejects with a network error when fetch rejects", async () => {
+    mockFetch().mockRejectedValue(new TypeError("Failed to fetch"));
+
+    await expect(deleteSelectedTodos({ ids: [todo.id] })).rejects.toMatchObject({
+      type: "network",
+    });
+  });
+
+  it("rejects with a response_validation error on a bad body", async () => {
+    mockFetch().mockResolvedValue(jsonResponse({ deletedCount: 0 }));
+
+    await expect(deleteSelectedTodos({ ids: [todo.id] })).rejects.toMatchObject({
+      type: "response_validation",
+    });
   });
 });
