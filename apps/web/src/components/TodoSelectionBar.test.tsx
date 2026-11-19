@@ -22,6 +22,10 @@ function renderBar(overrides: Partial<BarProps> = {}) {
     error: null,
     onMarkSelected: vi.fn(),
     onRetry: vi.fn(),
+    deleteResult: null,
+    deleteError: null,
+    onDeleteSelected: vi.fn(),
+    onRetryDelete: vi.fn(),
     ...overrides,
   };
   render(<TodoSelectionBar {...props} />);
@@ -211,6 +215,88 @@ describe("TodoSelectionBar, batch completion", () => {
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent(
       "None of the selected todos exist anymore. Nothing was changed.",
+    );
+    expect(within(alert).queryByRole("button")).toBeNull();
+  });
+});
+
+describe("TodoSelectionBar, batch delete", () => {
+  const ids = ["a", "b", "c"];
+
+  it("names the count and is described by the permanence note", () => {
+    renderBar({ selectedCount: 3 });
+
+    const button = screen.getByRole("button", { name: "Delete 3 selected todos" });
+    expect(button).toHaveAccessibleDescription("Deleted todos cannot be restored.");
+  });
+
+  it("is aria-disabled and ignores clicks when nothing is selected", async () => {
+    const props = renderBar({ selectedCount: 0 });
+
+    const button = screen.getByRole("button", { name: "Delete selected todos" });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    await userEvent.click(button);
+    expect(props.onDeleteSelected).not.toHaveBeenCalled();
+  });
+
+  it("calls onDeleteSelected when clicked", async () => {
+    const props = renderBar({ selectedCount: 1 });
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete 1 selected todo" }));
+    expect(props.onDeleteSelected).toHaveBeenCalledTimes(1);
+  });
+
+  it("is locked while a batch is pending", async () => {
+    const props = renderBar({ selectedCount: 3, isPending: true, deleteInput: { ids } });
+
+    const button = screen.getByRole("button", { name: "Delete 3 selected todos" });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    button.focus();
+    await userEvent.click(button);
+    expect(props.onDeleteSelected).not.toHaveBeenCalled();
+    expect(button).toHaveFocus();
+  });
+
+  it("shows the pending message in a polite status region", () => {
+    renderBar({ selectedCount: 3, isPending: true, deleteInput: { ids } });
+    expect(screen.getAllByRole("status").some((s) => s.textContent === "Deleting 3 todos")).toBe(
+      true,
+    );
+  });
+
+  it("shows the result message", () => {
+    renderBar({ deleteResult: 1 });
+    expect(screen.getAllByRole("status").some((s) => s.textContent === "Deleted 1 todo.")).toBe(
+      true,
+    );
+  });
+
+  it("shows a failure alert with Retry", async () => {
+    const props = renderBar({
+      selectedCount: 3,
+      deleteInput: { ids },
+      deleteError: new TodoApiError("http", "boom", { status: 500 }),
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Could not delete the selected todos. Nothing was deleted.");
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(props.onRetryDelete).toHaveBeenCalledTimes(1);
+    expect(props.onRetry).not.toHaveBeenCalled();
+  });
+
+  it("hides Retry when nothing is left to retry", () => {
+    renderBar({
+      deleteInput: { ids },
+      deleteError: new TodoApiError("batch_conflict", "conflict", {
+        status: 409,
+        missingIds: ids,
+      }),
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(
+      "None of the selected todos exist anymore. Nothing was deleted.",
     );
     expect(within(alert).queryByRole("button")).toBeNull();
   });

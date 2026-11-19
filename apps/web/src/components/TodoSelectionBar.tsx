@@ -1,4 +1,4 @@
-import type { UpdateSelectedTodosInput } from "@todo/contracts";
+import type { DeleteSelectedTodosInput, UpdateSelectedTodosInput } from "@todo/contracts";
 import type { Ref } from "react";
 
 import {
@@ -7,6 +7,12 @@ import {
   getBatchResultMessage,
   getBatchRetryIds,
 } from "../module/todo.batchCompletion";
+import {
+  getBatchDeleteErrorMessage,
+  getBatchDeleteLabel,
+  getBatchDeletePendingMessage,
+  getBatchDeleteResultMessage,
+} from "../module/todo.batchDelete";
 import {
   getSelectedCountLabel,
   getSelectionNoticeMessage,
@@ -19,6 +25,9 @@ const buttonClassName =
 
 const doneClassName =
   "rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
+
+const deleteClassName =
+  "rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
 
 const retryClassName =
   "mt-2 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
@@ -66,6 +75,11 @@ export function TodoSelectionBar({
   error,
   onMarkSelected,
   onRetry,
+  deleteInput,
+  deleteResult,
+  deleteError,
+  onDeleteSelected,
+  onRetryDelete,
 }: {
   selectedCount: number;
   pageState: SelectPageState;
@@ -81,11 +95,17 @@ export function TodoSelectionBar({
   error: unknown;
   onMarkSelected: (completed: boolean) => void;
   onRetry: () => void;
+  deleteInput?: DeleteSelectedTodosInput;
+  deleteResult: number | null;
+  deleteError: unknown;
+  onDeleteSelected: () => void;
+  onRetryDelete: () => void;
 }) {
   const pageUnavailable = isPending || pageState === "none";
   const clearUnavailable = isPending || selectedCount === 0;
   const markUnavailable = isPending || selectedCount === 0;
   const retryIds = input ? getBatchRetryIds(error, input.ids) : [];
+  const deleteRetryIds = deleteInput ? getBatchRetryIds(deleteError, deleteInput.ids) : [];
 
   return (
     <div
@@ -145,13 +165,31 @@ export function TodoSelectionBar({
             {completed ? "Mark selected as completed" : "Mark selected as active"}
           </button>
         ))}
+        <button
+          type="button"
+          aria-disabled={markUnavailable}
+          aria-describedby="delete-selected-note"
+          onClick={() => {
+            if (!markUnavailable) onDeleteSelected();
+          }}
+          className={deleteClassName}
+        >
+          {getBatchDeleteLabel(selectedCount)}
+        </button>
       </div>
+      <p id="delete-selected-note" className="mt-1 text-xs text-slate-500">
+        Deleted todos cannot be restored.
+      </p>
       <p role="status" aria-live="polite" className="mt-1 text-xs text-slate-600">
-        {isPending && input
-          ? getBatchPendingMessage({ count: input.ids.length, completed: input.completed })
-          : result
-            ? getBatchResultMessage(result)
-            : ""}
+        {isPending && deleteInput
+          ? getBatchDeletePendingMessage(deleteInput.ids.length)
+          : isPending && input
+            ? getBatchPendingMessage({ count: input.ids.length, completed: input.completed })
+            : deleteResult !== null
+              ? getBatchDeleteResultMessage(deleteResult)
+              : result
+                ? getBatchResultMessage(result)
+                : ""}
       </p>
       {!isPending && error != null && input && (
         <div
@@ -161,6 +199,19 @@ export function TodoSelectionBar({
           <p>{getBatchErrorMessage(error, input.ids)}</p>
           {retryIds.length > 0 && (
             <button type="button" onClick={onRetry} className={retryClassName}>
+              Retry
+            </button>
+          )}
+        </div>
+      )}
+      {!isPending && deleteError != null && deleteInput && (
+        <div
+          role="alert"
+          className="mt-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+        >
+          <p>{getBatchDeleteErrorMessage(deleteError, deleteInput.ids)}</p>
+          {deleteRetryIds.length > 0 && (
+            <button type="button" onClick={onRetryDelete} className={retryClassName}>
               Retry
             </button>
           )}

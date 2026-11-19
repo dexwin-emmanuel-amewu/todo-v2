@@ -36,12 +36,14 @@ export const setAllTodosCompletedResponseSchema = z.object({
 
 export type SetAllTodosCompletedResponse = z.infer<typeof setAllTodosCompletedResponseSchema>;
 
+export const selectedTodoIdsSchema = z
+  .array(z.uuid())
+  .min(1)
+  .max(100)
+  .refine((ids) => new Set(ids).size === ids.length, { message: "ids must be unique" });
+
 export const updateSelectedTodosSchema = z.object({
-  ids: z
-    .array(z.uuid())
-    .min(1)
-    .max(100)
-    .refine((ids) => new Set(ids).size === ids.length, { message: "ids must be unique" }),
+  ids: selectedTodoIdsSchema,
   completed: z.boolean(),
 });
 
@@ -52,6 +54,16 @@ export const updateSelectedTodosResponseSchema = z.object({
 });
 
 export type UpdateSelectedTodosResponse = z.infer<typeof updateSelectedTodosResponseSchema>;
+
+export const deleteSelectedTodosSchema = z.object({ ids: selectedTodoIdsSchema });
+
+export type DeleteSelectedTodosInput = z.infer<typeof deleteSelectedTodosSchema>;
+
+export const deleteSelectedTodosResponseSchema = z.object({
+  deletedCount: z.number().int().min(1).max(100),
+});
+
+export type DeleteSelectedTodosResponse = z.infer<typeof deleteSelectedTodosResponseSchema>;
 
 export const batchConflictErrorResponseSchema = z.object({
   error: z.object({

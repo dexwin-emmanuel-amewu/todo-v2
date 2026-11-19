@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   batchConflictErrorResponseSchema,
   clearCompletedTodosResponseSchema,
+  deleteSelectedTodosResponseSchema,
+  deleteSelectedTodosSchema,
   notFoundErrorResponseSchema,
   patchTodoSchema,
   replaceTodoSchema,
@@ -316,5 +318,44 @@ describe("batchConflictErrorResponseSchema", () => {
         error: { type: "batch_conflict", missingIds: [] },
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("deleteSelectedTodosSchema", () => {
+  const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const ids = (count: number) => Array.from({ length: count }, (_, n) => id(n));
+
+  it("accepts 1 id and 100 ids", () => {
+    expect(deleteSelectedTodosSchema.safeParse({ ids: ids(1) }).success).toBe(true);
+    expect(deleteSelectedTodosSchema.safeParse({ ids: ids(100) }).success).toBe(true);
+  });
+
+  it.each([
+    ["no ids", { ids: [] }],
+    ["101 ids", { ids: ids(101) }],
+    ["a duplicate id", { ids: [id(1), id(1)] }],
+    ["a non-UUID id", { ids: ["not-a-uuid"] }],
+    ["a missing ids", {}],
+    ["a non-object body", "ids"],
+  ])("rejects %s", (_, body) => {
+    expect(deleteSelectedTodosSchema.safeParse(body).success).toBe(false);
+  });
+
+  it("names the duplicate issue", () => {
+    const result = deleteSelectedTodosSchema.safeParse({ ids: [id(1), id(1)] });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.message)).toContain("ids must be unique");
+    }
+  });
+});
+
+describe("deleteSelectedTodosResponseSchema", () => {
+  it("accepts a count from 1 to 100 and rejects 0 and 101", () => {
+    expect(deleteSelectedTodosResponseSchema.safeParse({ deletedCount: 1 }).success).toBe(true);
+    expect(deleteSelectedTodosResponseSchema.safeParse({ deletedCount: 100 }).success).toBe(true);
+    expect(deleteSelectedTodosResponseSchema.safeParse({ deletedCount: 0 }).success).toBe(false);
+    expect(deleteSelectedTodosResponseSchema.safeParse({ deletedCount: 101 }).success).toBe(false);
   });
 });

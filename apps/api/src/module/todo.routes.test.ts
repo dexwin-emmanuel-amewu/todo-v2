@@ -1,6 +1,7 @@
 import {
   batchConflictErrorResponseSchema,
   clearCompletedTodosResponseSchema,
+  deleteSelectedTodosResponseSchema,
   internalErrorResponseSchema,
   notFoundErrorResponseSchema,
   setAllTodosCompletedResponseSchema,
@@ -35,6 +36,7 @@ import {
   parseStatusFilter,
   parseTodoId,
   toClearCompletedTodosResponse,
+  toDeleteSelectedTodosResponse,
   toCreateTodoResponse,
   toDeleteTodoResponse,
   toGetTodoResponse,
@@ -2439,6 +2441,196 @@ describe("PATCH /todos/batch", () => {
     expect(response.statusCode).toBe(409);
     expect(batchConflictErrorResponseSchema.parse(response.json())).toEqual({
       error: { type: "batch_conflict", missingIds: [missingId] },
+    });
+  });
+});
+
+describe("toDeleteSelectedTodosResponse", () => {
+  it("maps a successful delete to 200 with the count", () => {
+    const response = toDeleteSelectedTodosResponse(ok({ deletedCount: 2 }));
+
+    expect(response).toEqual({ status: 200, body: { deletedCount: 2 } });
+  });
+
+  it("maps a request validation error to 400", () => {
+    const response = toDeleteSelectedTodosResponse(
+      err({ type: "request_validation", issues: ["ids must be unique"] }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it("maps a batch conflict to 409 with the missing ids", () => {
+    const response = toDeleteSelectedTodosResponse(
+      err({ type: "batch_conflict", missingIds: [exampleTodo.id] }),
+    );
+
+    expect(response).toEqual({
+      status: 409,
+      body: { error: { type: "batch_conflict", missingIds: [exampleTodo.id] } },
+    });
+  });
+
+  it("maps a database error to 500 without leaking the cause", () => {
+    const response = toDeleteSelectedTodosResponse(
+      err({ type: "database", cause: new Error("boom") }),
+    );
+
+    expect(response).toEqual({ status: 500, body: { error: { type: "internal" } } });
+  });
+});
+
+describe("POST /todos/batch-delete", () => {
+  let database: DisposableDatabase;
+  const missingId = "00000000-0000-4000-8000-000000000000";
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  async function seed(title: string) {
+    const created = await createTodo(database.db, { title });
+    if (created.isErr()) throw created.error;
+    return created.value;
+  }
+
+  async function exists(id: string) {
+    return (await getTodoById(database.db, id)).isOk();
+  }
+
+  it("deletes the listed todos, returns the count, and leaves the rest", async () => {
+    const app = buildApp(database.db);
+    const first = await seed("Route delete first");
+    const second = await seed("Route delete second");
+    const other = await seed("Route delete other");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/todos/batch-delete",
+      payload: { ids: [first.id, second.id] },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(deleteSelectedTodosResponseSchema.parse(response.json())).toEqual({ deletedCount: 2 });
+    expect(await exists(first.id)).toBe(false);
+    expect(await exists(second.id)).toBe(false);
+    expect(await exists(other.id)).toBe(true);
+  });
+
+  it("accepts 100 ids in one transaction", async () => {
+    const app = buildApp(database.db);
+    const ids: string[] = [];
+    for (let n = 0; n < 100; n += 1) ids.push((await seed(`Hundred delete ${n}`)).id);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/todos/batch-delete",
+      payload: { ids },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ deletedCount: 100 });
+  });
+
+  it.each([
+    ["an empty ids list", { ids: [] }],
+    ["101 ids", { ids: Array.from({ length: 101 }, () => missingId) }],
+    ["a duplicate id", { ids: [missingId, missingId] }],
+    ["a non-UUID id", { ids: ["abc"] }],
+    ["a missing ids", {}],
+  ])("returns 400 for %s and deletes nothing", async (_, payload) => {
+    const app = buildApp(database.db);
+    const todo = await seed("Delete validation untouched");
+
+    const response = await app.inject({ method: "POST", url: "/todos/batch-delete", payload });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+    expect(await exists(todo.id)).toBe(true);
+  });
+
+  it("names the duplicate issue", async () => {
+    const app = buildApp(database.db);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/todos/batch-delete",
+      payload: { ids: [missingId, missingId] },
+    });
+
+    expect(validationErrorResponseSchema.parse(response.json()).error.issues).toContain(
+      "ids must be unique",
+    );
+  });
+
+  it("returns 400 for a missing body", async () => {
+    const app = buildApp(database.db);
+
+    const response = await app.inject({ method: "POST", url: "/todos/batch-delete" });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("returns 409 batch_conflict with the missing ids and deletes nothing", async () => {
+    const app = buildApp(database.db);
+    const existing = await seed("Delete conflict existing");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/todos/batch-delete",
+      payload: { ids: [existing.id, missingId] },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(batchConflictErrorResponseSchema.parse(response.json())).toEqual({
+      error: { type: "batch_conflict", missingIds: [missingId] },
+    });
+
+    const list = await app.inject({ method: "GET", url: "/todos?pageSize=100" });
+    const titles = todoListResponseSchema.parse(list.json()).items.map((todo) => todo.title);
+    expect(titles).toContain("Delete conflict existing");
+  });
+
+  it("returns 200 and then 409 when the same request is sent twice", async () => {
+    const app = buildApp(database.db);
+    const todo = await seed("Delete twice");
+    const request = {
+      method: "POST" as const,
+      url: "/todos/batch-delete",
+      payload: { ids: [todo.id] },
+    };
+
+    const first = await app.inject(request);
+    const second = await app.inject(request);
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toEqual({
+      error: { type: "batch_conflict", missingIds: [todo.id] },
+    });
+  });
+
+  it("returns 500 with the internal body when the database fails", async () => {
+    const failingDb = {
+      transaction: () => Promise.reject(new Error("connection lost")),
+    } as unknown as Db;
+    const app = buildApp(failingDb);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/todos/batch-delete",
+      payload: { ids: [missingId] },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(internalErrorResponseSchema.parse(response.json())).toEqual({
+      error: { type: "internal" },
     });
   });
 });
