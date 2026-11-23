@@ -69,6 +69,7 @@ export function TodoSelectionBar({
   onClear,
   onDone,
   pageButtonRef,
+  barRef,
   isPending,
   input,
   result,
@@ -89,6 +90,7 @@ export function TodoSelectionBar({
   onClear: () => void;
   onDone: () => void;
   pageButtonRef?: Ref<HTMLButtonElement>;
+  barRef?: Ref<HTMLDivElement>;
   isPending: boolean;
   input?: UpdateSelectedTodosInput;
   result: BatchResult | null;
@@ -109,6 +111,7 @@ export function TodoSelectionBar({
 
   return (
     <div
+      ref={barRef}
       role="group"
       aria-label="Selection"
       className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3"

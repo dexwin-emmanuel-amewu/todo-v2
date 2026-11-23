@@ -109,6 +109,7 @@ export function HomePage() {
   const [selection, dispatchSelection] = useReducer(selectionReducer, initialSelectionState);
   const selectButtonRef = useRef<HTMLButtonElement>(null);
   const selectPageButtonRef = useRef<HTMLButtonElement>(null);
+  const selectionBarRef = useRef<HTMLDivElement>(null);
   const pendingSelectionFocus = useRef<"page_button" | "select_button" | "empty_heading" | null>(
     null,
   );
@@ -213,9 +214,11 @@ export function HomePage() {
     if (!target) return;
     pendingSelectionFocus.current = null;
 
-    // Clear keeps focus on its own button. Other requests only take focus that was lost.
+    // Clear keeps focus inside the selection bar. Other requests only take focus that was lost.
     const active = document.activeElement;
-    if (target !== "page_button" && active && active !== document.body) return;
+    const focusLost = !active || active === document.body;
+    const staysInBar = target === "page_button" && selectionBarRef.current?.contains(active);
+    if (!focusLost && !staysInBar) return;
 
     const element =
       target === "page_button"
@@ -344,6 +347,7 @@ export function HomePage() {
             }}
             onDone={exitSelection}
             pageButtonRef={selectPageButtonRef}
+            barRef={selectionBarRef}
             isPending={batchPending}
             input={batchMutation.variables}
             result={batchResult}
