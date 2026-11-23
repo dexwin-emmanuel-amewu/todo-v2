@@ -2086,6 +2086,32 @@ describe("HomePage selected completion", () => {
     expect(rowText(3)).toHaveTextContent("Active");
   });
 
+  it("leaves focus in the search box when an update finishes", async () => {
+    const server = fakeServer(makeTodos(3, () => false));
+    let release: () => void = () => {};
+    server.failBatchWith(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = () => {
+            server.state.items[0].completed = true;
+            resolve(jsonResponse({ updatedCount: 1 }));
+          };
+        }),
+    );
+    renderPage();
+    const group = await selectRows(1);
+
+    await userEvent.click(within(group).getByRole("button", completedButton));
+    await within(group).findByText("Marking 1 todo as completed");
+    const searchBox = screen.getByRole("searchbox", { name: "Search todos" });
+    await userEvent.click(searchBox);
+    release();
+
+    expect(await within(group).findByText("1 todo marked as completed")).toBeInTheDocument();
+    expect(within(group).getAllByRole("status")[0]).toHaveTextContent("0 selected");
+    expect(searchBox).toHaveFocus();
+  });
+
   it("marks selected todos active", async () => {
     const server = fakeServer(makeTodos(2, () => true));
     renderPage();
@@ -2258,6 +2284,32 @@ describe("HomePage selected deletion", () => {
     expect(screen.getByRole("checkbox", { name: "Select Todo number 3" })).toBeInTheDocument();
     expect(within(group).getAllByRole("status")[0]).toHaveTextContent("0 selected");
     expect(within(group).getByRole("button", { name: "Select this page" })).toHaveFocus();
+  });
+
+  it("leaves focus in the search box when a delete finishes", async () => {
+    const server = fakeServer(makeTodos(3, () => false));
+    let release: () => void = () => {};
+    server.failBatchDeleteWith(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = () => {
+            server.state.items = server.state.items.slice(1);
+            resolve(jsonResponse({ deletedCount: 1 }));
+          };
+        }),
+    );
+    renderPage();
+    const group = await selectRows(1);
+
+    await userEvent.click(deleteButton(group));
+    await within(group).findByText("Deleting 1 todo");
+    const searchBox = screen.getByRole("searchbox", { name: "Search todos" });
+    await userEvent.click(searchBox);
+    release();
+
+    expect(await within(group).findByText("Deleted 1 todo.")).toBeInTheDocument();
+    expect(within(group).getAllByRole("status")[0]).toHaveTextContent("0 selected");
+    expect(searchBox).toHaveFocus();
   });
 
   it("focuses the empty heading when every todo is deleted", async () => {
