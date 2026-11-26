@@ -157,7 +157,6 @@ function TodoListItem({
   onDelete,
   registerEditButton,
   registerDeleteButton,
-  locked,
 }: {
   todo: Todo;
   controls: CompletionControls;
@@ -171,7 +170,6 @@ function TodoListItem({
   onDelete: (todo: Todo) => void;
   registerEditButton: (todoId: string, button: HTMLButtonElement | null) => void;
   registerDeleteButton: (todoId: string, button: HTMLButtonElement | null) => void;
-  locked: boolean;
 }) {
   const [draft, setDraft] = useState(todo.title);
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
@@ -426,7 +424,6 @@ function TodoItems({
   emptyHeadingRef,
   emptyMessage,
   onClearSearch,
-  locked,
 }: {
   items: Todo[];
   busy: boolean;
@@ -444,7 +441,6 @@ function TodoItems({
   emptyHeadingRef: RefObject<HTMLHeadingElement | null>;
   emptyMessage: string;
   onClearSearch?: () => void;
-  locked: boolean;
 }) {
   if (items.length === 0) {
     // The empty result belongs to the previous filter, so say nothing until the new one arrives.
@@ -487,7 +483,6 @@ function TodoItems({
           onDelete={onDelete}
           registerEditButton={registerEditButton}
           registerDeleteButton={registerDeleteButton}
-          locked={locked}
         />
       ))}
     </ul>
@@ -627,16 +622,6 @@ export function TodoList({
       { state: P.union("ready", "refreshing", "loading_query", "refresh_failure") },
       (listState) => (
         <div className="space-y-3">
-          {listState.state === "refreshing" && (
-            <p role="status" aria-live="polite" className="text-sm text-slate-500">
-              Refreshing
-            </p>
-          )}
-          {listState.state === "loading_query" && (
-            <p role="status" aria-live="polite" className="text-sm text-slate-500">
-              Updating results
-            </p>
-          )}
           {listState.state !== "loading_query" && totalItems !== undefined && totalItems > 0 && (
             <p className="text-sm text-slate-600">{countLabel(filter, totalItems, search)}</p>
           )}
@@ -648,7 +633,8 @@ export function TodoList({
           )}
           <TodoItems
             items={listState.items}
-            busy={listState.state === "refreshing" || listState.state === "loading_query" || busy}
+            busy={busy}
+            refreshing={listState.state === "refreshing" || listState.state === "loading_query"}
             controls={completion}
             replacement={replacement}
             deletion={deletion}
@@ -676,8 +662,8 @@ export function TodoList({
       ? "Updating…"
       : replacement.isPending
         ? "Saving"
-        : state.state === "loading_filter"
-          ? `Loading ${filter === "all" ? "" : `${filter} `}todos`
+        : state.state === "loading_query"
+          ? "Updating results"
           : state.state === "refreshing"
             ? "Refreshing"
             : state.state === "initial_loading"

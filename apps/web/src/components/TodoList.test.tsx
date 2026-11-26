@@ -470,10 +470,10 @@ describe("TodoList", () => {
 
   describe("status filter", () => {
     it("keeps the old rows, disables their actions, and announces the filter loading", () => {
-      render(<TodoList state={{ state: "loading_filter", items }} filter="active" />);
+      render(<TodoList state={{ state: "loading_query", items }} filter="active" />);
 
       expect(screen.getAllByRole("listitem")).toHaveLength(3);
-      expect(screen.getByRole("status")).toHaveTextContent("Loading active todos");
+      expect(screen.getByRole("status")).toHaveTextContent("Updating results");
       expect(
         screen.getByRole("checkbox", { name: "Mark Buy oat milk as completed" }),
       ).toBeDisabled();
@@ -482,10 +482,10 @@ describe("TodoList", () => {
     });
 
     it("shows no empty message for the new filter while old empty results are loading", () => {
-      render(<TodoList state={{ state: "loading_filter", items: [] }} filter="completed" />);
+      render(<TodoList state={{ state: "loading_query", items: [] }} filter="completed" />);
 
       expect(screen.queryByRole("heading")).not.toBeInTheDocument();
-      expect(screen.getByRole("status")).toHaveTextContent("Loading completed todos");
+      expect(screen.getByRole("status")).toHaveTextContent("Updating results");
     });
 
     it.each([

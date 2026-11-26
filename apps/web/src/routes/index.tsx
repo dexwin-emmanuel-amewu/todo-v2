@@ -37,7 +37,6 @@ export function HomePage() {
     status: query.status,
     isFetching: query.isFetching,
     isPlaceholderData: query.isPlaceholderData,
-    isPlaceholderData: query.isPlaceholderData,
     data: query.data,
     error: query.error,
     refetch: () => void query.refetch(),

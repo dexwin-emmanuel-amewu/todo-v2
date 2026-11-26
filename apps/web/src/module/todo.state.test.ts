@@ -42,7 +42,6 @@ function snapshot(overrides: Partial<TodoListQuerySnapshot>): TodoListQuerySnaps
     status: "pending",
     isFetching: false,
     isPlaceholderData: false,
-    isPlaceholderData: false,
     data: undefined,
     error: null,
     refetch: vi.fn(),
