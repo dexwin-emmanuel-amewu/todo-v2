@@ -1,6 +1,7 @@
 import type { Todo } from "@todo/contracts";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { TodoApiError } from "../api/todo.api";
@@ -271,5 +272,199 @@ describe("TodoList", () => {
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-enables the other rows when the row being edited disappears", async () => {
+    const { rerender } = render(<TodoList state={{ state: "ready", items }} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit Buy oat milk" }));
+    expect(screen.getByRole("button", { name: "Edit Water the plants" })).toBeDisabled();
+
+    rerender(<TodoList state={{ state: "ready", items: items.slice(1) }} />);
+
+    expect(screen.getByRole("button", { name: "Edit Water the plants" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete Water the plants" })).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: "Mark Water the plants as active" })).toBeEnabled();
+  });
+
+  it("keeps the draft being edited when the list refreshes in the background", async () => {
+    const { rerender } = render(<TodoList state={{ state: "ready", items }} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit Buy oat milk" }));
+    const input = screen.getByRole("textbox", { name: "Edit title for Buy oat milk" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "Buy almond milk");
+
+    rerender(<TodoList state={{ state: "refreshing", items }} />);
+    expect(screen.getByRole("textbox", { name: "Edit title for Buy oat milk" })).toHaveValue(
+      "Buy almond milk",
+    );
+
+    rerender(<TodoList state={{ state: "refresh_failure", items, error, retry: vi.fn() }} />);
+    expect(screen.getByRole("textbox", { name: "Edit title for Buy oat milk" })).toHaveValue(
+      "Buy almond milk",
+    );
+
+    rerender(<TodoList state={{ state: "ready", items }} />);
+    expect(screen.getByRole("textbox", { name: "Edit title for Buy oat milk" })).toHaveValue(
+      "Buy almond milk",
+    );
+  });
+
+  describe("deletion", () => {
+    const idle = { isPending: false, error: null };
+
+    it("labels each Delete button with the todo title and dispatches that row's id", async () => {
+      const onDelete = vi.fn().mockResolvedValue(undefined);
+      render(<TodoList state={{ state: "ready", items }} deletion={{ ...idle, onDelete }} />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Delete Water the plants" }));
+
+      expect(onDelete).toHaveBeenCalledTimes(1);
+      expect(onDelete).toHaveBeenCalledWith(items[1].id);
+    });
+
+    it("disables the action, announces progress, and dispatches once on repeat activation", async () => {
+      let resolve: () => void = () => {};
+      const onDelete = vi.fn().mockReturnValue(new Promise<void>((r) => (resolve = r)));
+
+      function Harness() {
+        const [pending, setPending] = useState(false);
+        return (
+          <TodoList
+            state={{ state: "ready", items }}
+            deletion={{
+              isPending: pending,
+              pendingTodoId: items[0].id,
+              error: null,
+              onDelete: (id) => {
+                setPending(true);
+                return onDelete(id);
+              },
+            }}
+          />
+        );
+      }
+      render(<Harness />);
+
+      const button = screen.getByRole("button", { name: "Delete Buy oat milk" });
+      await userEvent.click(button);
+      await userEvent.click(button);
+      button.focus();
+      await userEvent.keyboard("{Enter}");
+
+      expect(onDelete).toHaveBeenCalledTimes(1);
+      expect(button).toBeDisabled();
+      expect(screen.getByRole("status")).toHaveTextContent("Deleting Buy oat milk");
+      resolve();
+    });
+
+    it("keeps the row and offers retry after a failure", async () => {
+      const onDelete = vi.fn().mockResolvedValue(undefined);
+      render(
+        <TodoList
+          state={{ state: "ready", items }}
+          deletion={{ isPending: false, error, errorTodoId: items[0].id, onDelete }}
+        />,
+      );
+
+      expect(screen.getByText("Buy oat milk")).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent(/could not reach the server/i);
+      await userEvent.click(screen.getByRole("button", { name: "Retry delete" }));
+      expect(onDelete).toHaveBeenCalledWith(items[0].id);
+    });
+
+    it("explains a 404 when the row is still showing", () => {
+      render(
+        <TodoList
+          state={{ state: "ready", items }}
+          deletion={{
+            isPending: false,
+            error: new TodoApiError("http", "missing", { status: 404 }),
+            errorTodoId: items[0].id,
+            onDelete: vi.fn(),
+          }}
+        />,
+      );
+
+      expect(screen.getByRole("alert")).toHaveTextContent(/no longer exists/i);
+    });
+
+    function Deleting({ initial }: { initial: Todo[] }) {
+      const [list, setList] = useState(initial);
+      return (
+        <>
+          <button type="button">Elsewhere</button>
+          <TodoList
+            state={{ state: "ready", items: list }}
+            deletion={{
+              isPending: false,
+              error: null,
+              onDelete: async (id) => setList((current) => current.filter((t) => t.id !== id)),
+            }}
+          />
+        </>
+      );
+    }
+
+    it("focuses the next row's Delete action after removal", async () => {
+      render(<Deleting initial={items} />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Delete Buy oat milk" }));
+
+      expect(screen.getByRole("button", { name: "Delete Water the plants" })).toHaveFocus();
+    });
+
+    it("focuses the previous row's Delete action when the last row is removed", async () => {
+      render(<Deleting initial={items} />);
+
+      await userEvent.click(
+        screen.getByRole("button", { name: "Delete Renew the parking permit" }),
+      );
+
+      expect(screen.getByRole("button", { name: "Delete Water the plants" })).toHaveFocus();
+    });
+
+    it("focuses the empty-state heading when the only row is removed", async () => {
+      render(<Deleting initial={[items[0]]} />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Delete Buy oat milk" }));
+
+      expect(screen.getByRole("heading", { name: /no todos yet/i })).toHaveFocus();
+    });
+
+    it("does not steal focus when the user moved it while deletion was pending", async () => {
+      let finish: () => void = () => {};
+      function Slow() {
+        const [list, setList] = useState(items);
+        return (
+          <>
+            <button type="button">Elsewhere</button>
+            <TodoList
+              state={{ state: "ready", items: list }}
+              deletion={{
+                isPending: false,
+                error: null,
+                onDelete: (id) =>
+                  new Promise<void>((r) => {
+                    finish = () => {
+                      setList((current) => current.filter((t) => t.id !== id));
+                      r();
+                    };
+                  }),
+              }}
+            />
+          </>
+        );
+      }
+      render(<Slow />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Delete Buy oat milk" }));
+      screen.getByRole("button", { name: "Elsewhere" }).focus();
+      finish();
+
+      await waitFor(() => expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument());
+      expect(screen.getByRole("button", { name: "Elsewhere" })).toHaveFocus();
+    });
   });
 });

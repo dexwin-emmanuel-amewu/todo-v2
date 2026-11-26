@@ -219,3 +219,30 @@ export async function replaceTodo(
 
   return parsed.data;
 }
+
+export async function deleteTodo(todoId: string): Promise<void> {
+  const parsedId = todoIdParamSchema.safeParse(todoId);
+
+  if (!parsedId.success) {
+    throw new TodoApiError("request_validation", "The todo deletion request was invalid.", {
+      issues: parsedId.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(`${TODO_API_BASE_URL}/todos/${parsedId.data}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+  } catch (cause) {
+    throw new TodoApiError("network", "Could not reach the API.", { cause });
+  }
+
+  if (!response.ok) {
+    throw new TodoApiError("http", `The API responded with ${response.status}.`, {
+      status: response.status,
+    });
+  }
+}

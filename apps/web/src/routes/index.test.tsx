@@ -237,4 +237,59 @@ describe("HomePage", () => {
     });
     expect(mockFetch().mock.calls[2][1].method).toBe("GET");
   });
+
+  it("deletes one todo with a bodyless DELETE and refreshes the list", async () => {
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(jsonResponse(listBody([todos[1]])));
+
+    renderPage();
+    await screen.findByText("Buy oat milk");
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete Buy oat milk" }));
+
+    await waitFor(() => expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument());
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Delete Water the plants" })).toHaveFocus();
+    expect(mockFetch()).toHaveBeenCalledTimes(3);
+    expect(mockFetch().mock.calls[1][0]).toBe(`/todos/${todos[0].id}`);
+    expect(mockFetch().mock.calls[1][1].method).toBe("DELETE");
+    expect(mockFetch().mock.calls[1][1].body).toBeUndefined();
+    expect(mockFetch().mock.calls[2][1].method).toBe("GET");
+  });
+
+  it("keeps the row after a failed delete and allows retry", async () => {
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+      .mockResolvedValueOnce(jsonResponse({}, 500))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(jsonResponse(listBody([todos[1]])));
+
+    renderPage();
+    await screen.findByText("Buy oat milk");
+    await userEvent.click(screen.getByRole("button", { name: "Delete Buy oat milk" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not delete this todo/i);
+    expect(screen.getByText("Buy oat milk")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry delete" }));
+
+    await waitFor(() => expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument());
+    expect(mockFetch()).toHaveBeenCalledTimes(4);
+  });
+
+  it("refreshes the list after a 404 and removes the stale row", async () => {
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse(listBody(todos)))
+      .mockResolvedValueOnce(jsonResponse({}, 404))
+      .mockResolvedValueOnce(jsonResponse(listBody([todos[1]])));
+
+    renderPage();
+    await screen.findByText("Buy oat milk");
+    await userEvent.click(screen.getByRole("button", { name: "Delete Buy oat milk" }));
+
+    await waitFor(() => expect(screen.queryByText("Buy oat milk")).not.toBeInTheDocument());
+    expect(mockFetch().mock.calls[2][1].method).toBe("GET");
+  });
 });
