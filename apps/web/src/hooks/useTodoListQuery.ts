@@ -1,13 +1,20 @@
-import { type TodoListResponse } from "@todo/contracts";
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { type TodoListResponse, type TodoStatusFilter } from "@todo/contracts";
+import { keepPreviousData, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { fetchTodoList, type TodoApiError } from "../api/todo.api";
 
 export const todoListQueryKey = ["todos", "list"] as const;
 
-export function useTodoListQuery(): UseQueryResult<TodoListResponse, TodoApiError> {
+export function getTodoListQueryKey(status: TodoStatusFilter) {
+  return [...todoListQueryKey, { status }] as const;
+}
+
+export function useTodoListQuery(
+  status: TodoStatusFilter = "all",
+): UseQueryResult<TodoListResponse, TodoApiError> {
   return useQuery<TodoListResponse, TodoApiError>({
-    queryKey: todoListQueryKey,
-    queryFn: fetchTodoList,
+    queryKey: getTodoListQueryKey(status),
+    queryFn: () => fetchTodoList(status),
     staleTime: 30_000,
+    placeholderData: keepPreviousData,
   });
 }

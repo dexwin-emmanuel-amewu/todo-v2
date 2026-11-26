@@ -41,6 +41,7 @@ function snapshot(overrides: Partial<TodoListQuerySnapshot>): TodoListQuerySnaps
   return {
     status: "pending",
     isFetching: false,
+    isPlaceholderData: false,
     data: undefined,
     error: null,
     refetch: vi.fn(),
@@ -82,6 +83,14 @@ describe("getTodoListViewState", () => {
     const state = getTodoListViewState(snapshot({ status: "success", isFetching: true, data }));
 
     expect(state).toEqual({ state: "refreshing", items });
+  });
+
+  it("maps placeholder data from another filter to loading_filter carrying the old items", () => {
+    const state = getTodoListViewState(
+      snapshot({ status: "success", isFetching: true, isPlaceholderData: true, data }),
+    );
+
+    expect(state).toEqual({ state: "loading_filter", items });
   });
 
   it("maps an error that still has data to refresh_failure carrying both", () => {
