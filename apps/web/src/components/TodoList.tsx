@@ -291,7 +291,12 @@ function TodoListItem({
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
               {todo.completed ? "Completed" : "Active"}
             </span>
-            <button type="submit" disabled={isPending} className={retryClassName}>
+            <button
+              type="submit"
+              disabled={isPending}
+              aria-disabled={locked || undefined}
+              className={retryClassName}
+            >
               Save
             </button>
             <button
@@ -544,7 +549,8 @@ export function TodoList({
     else editButtonRefs.current.delete(todoId);
   };
   const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement>());
-  const emptyHeadingRef = useRef<HTMLHeadingElement>(null);
+  const ownEmptyHeadingRef = useRef<HTMLHeadingElement>(null);
+  const emptyHeadingRef = passedEmptyHeadingRef ?? ownEmptyHeadingRef;
   const areaRef = useRef<HTMLDivElement>(null);
   const lastAreaHeight = useRef(0);
   const deletionInFlight = useRef(false);
@@ -603,7 +609,7 @@ export function TodoList({
     if (target) target.focus();
     else if (fallback) fallback.focus();
     else emptyHeadingRef.current?.focus();
-  }, [items, deletion.isPending]);
+  }, [items, deletion.isPending, emptyHeadingRef]);
 
   // Holds the area at the last list's height while a new filter loads, so the page does not jump.
   useLayoutEffect(() => {
