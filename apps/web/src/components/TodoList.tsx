@@ -16,7 +16,7 @@ const cardClassName = "rounded-lg border border-slate-200 bg-white shadow-sm";
 const messageClassName = "py-8 text-center text-sm text-slate-500";
 const alertClassName = "rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700";
 const retryClassName =
-  "mt-2 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900";
+  "mt-2 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
 
 type CompletionControls = {
   isPending: boolean;
@@ -215,7 +215,8 @@ function TodoListItem({
 
   async function saveDraft(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    if (replacement.isPending) return;
+    // A bulk action is running. Saving now would send stale values.
+    if (replacement.isPending || locked) return;
 
     const parsed = replaceTodoSchema.safeParse({ title: draft, completed: todo.completed });
     if (!parsed.success) {
@@ -290,7 +291,12 @@ function TodoListItem({
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
               {todo.completed ? "Completed" : "Active"}
             </span>
-            <button type="submit" disabled={isPending} className={retryClassName}>
+            <button
+              type="submit"
+              disabled={isPending}
+              aria-disabled={locked || undefined}
+              className={retryClassName}
+            >
               Save
             </button>
             <button
@@ -311,6 +317,7 @@ function TodoListItem({
               <button
                 type="button"
                 disabled={isPending}
+                aria-disabled={locked || undefined}
                 onClick={() => void saveDraft()}
                 className={retryClassName}
               >
@@ -519,6 +526,7 @@ export function TodoList({
   totalItems,
   onClearSearch,
   bulkPending = false,
+  emptyHeadingRef: passedEmptyHeadingRef,
 }: {
   state: TodoListViewState;
   filter?: TodoStatusFilter;
@@ -529,6 +537,7 @@ export function TodoList({
   replacement?: ReplacementControls;
   deletion?: DeletionControls;
   bulkPending?: boolean;
+  emptyHeadingRef?: RefObject<HTMLHeadingElement | null>;
 }) {
   const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
   const editButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -540,7 +549,8 @@ export function TodoList({
     else editButtonRefs.current.delete(todoId);
   };
   const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement>());
-  const emptyHeadingRef = useRef<HTMLHeadingElement>(null);
+  const ownEmptyHeadingRef = useRef<HTMLHeadingElement>(null);
+  const emptyHeadingRef = passedEmptyHeadingRef ?? ownEmptyHeadingRef;
   const areaRef = useRef<HTMLDivElement>(null);
   const lastAreaHeight = useRef(0);
   const deletionInFlight = useRef(false);
@@ -599,7 +609,7 @@ export function TodoList({
     if (target) target.focus();
     else if (fallback) fallback.focus();
     else emptyHeadingRef.current?.focus();
-  }, [items, deletion.isPending]);
+  }, [items, deletion.isPending, emptyHeadingRef]);
 
   // Holds the area at the last list's height while a new filter loads, so the page does not jump.
   useLayoutEffect(() => {

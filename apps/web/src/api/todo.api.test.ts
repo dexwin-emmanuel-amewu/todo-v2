@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  clearCompletedTodos,
   createTodo,
   deleteTodo,
   fetchTodoList,
@@ -547,5 +548,51 @@ describe("fetchTodoSummary", () => {
     );
 
     await expect(fetchTodoSummary()).rejects.toMatchObject({ type: "http", status: 500 });
+  });
+});
+
+describe("clearCompletedTodos", () => {
+  it("sends one bodyless DELETE for the completed todos", async () => {
+    mockFetch().mockResolvedValue(jsonResponse({ deletedCount: 4 }));
+
+    await clearCompletedTodos();
+
+    expect(mockFetch()).toHaveBeenCalledTimes(1);
+    const [url, init] = mockFetch().mock.calls[0];
+    expect(url).toBe("/todos?status=completed");
+    expect(init).toMatchObject({ method: "DELETE", headers: { Accept: "application/json" } });
+    expect(init).not.toHaveProperty("body");
+  });
+
+  it("resolves the parsed deleted count", async () => {
+    mockFetch().mockResolvedValue(jsonResponse({ deletedCount: 4 }));
+
+    await expect(clearCompletedTodos()).resolves.toEqual({ deletedCount: 4 });
+  });
+
+  it("rejects with an http error on a 400 or a 500", async () => {
+    mockFetch()
+      .mockResolvedValueOnce(jsonResponse({ error: { type: "validation", issues: [] } }, 400))
+      .mockResolvedValueOnce(jsonResponse({ error: { type: "internal" } }, 500));
+
+    await expect(clearCompletedTodos()).rejects.toMatchObject({ type: "http", status: 400 });
+    await expect(clearCompletedTodos()).rejects.toMatchObject({ type: "http", status: 500 });
+  });
+
+  it("rejects with a network error when fetch rejects", async () => {
+    mockFetch().mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const error = await clearCompletedTodos().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(TodoApiError);
+    expect(error).toMatchObject({ type: "network" });
+  });
+
+  it("rejects with a response_validation error on invalid JSON or a bad body", async () => {
+    mockFetch()
+      .mockResolvedValueOnce(new Response("not json", { status: 200 }))
+      .mockResolvedValueOnce(jsonResponse({ deletedCount: -1 }));
+
+    await expect(clearCompletedTodos()).rejects.toMatchObject({ type: "response_validation" });
+    await expect(clearCompletedTodos()).rejects.toMatchObject({ type: "response_validation" });
   });
 });
