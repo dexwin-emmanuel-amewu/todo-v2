@@ -27,7 +27,8 @@ async function mockApi(page: Page) {
     (url) => url.pathname === "/todos",
     (route) => {
       const url = new URL(route.request().url());
-      requests.push(`${url.pathname}${url.search}`);
+
+      if (url.searchParams.get("pageSize") !== "1") requests.push(`${url.pathname}${url.search}`);
       const status = url.searchParams.get("status");
       const items =
         status === "active"

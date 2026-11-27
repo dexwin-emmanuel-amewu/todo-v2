@@ -1,5 +1,5 @@
 import type { Todo } from "@todo/contracts";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -110,6 +110,16 @@ describe("TodoList", () => {
     expect(screen.getByRole("list")).toHaveAttribute("aria-busy", "true");
     expect(screen.getAllByText("Active")).toHaveLength(2);
     expect(screen.getByRole("status")).toHaveTextContent("Updating…");
+  });
+
+  it("disables every row control while toggle-all is pending", () => {
+    render(<TodoList state={{ state: "ready", items }} bulkPending />);
+
+    for (const checkbox of screen.getAllByRole("checkbox")) expect(checkbox).toBeDisabled();
+    for (const button of screen.getAllByRole("button", { name: /^(Edit|Delete) / })) {
+      expect(button).toBeDisabled();
+    }
+    expect(screen.getByRole("list")).toHaveAttribute("aria-busy", "true");
   });
 
   it("shows row failure feedback and retries the same mutation", async () => {
@@ -413,6 +423,44 @@ describe("TodoList", () => {
       await userEvent.click(screen.getByRole("button", { name: "Delete Buy oat milk" }));
 
       expect(screen.getByRole("button", { name: "Delete Water the plants" })).toHaveFocus();
+    });
+
+    it("focuses the next row's Delete action once the refresh ends after removal", async () => {
+      function SlowRefresh() {
+        const [list, setList] = useState(items);
+        const [pending, setPending] = useState(false);
+        return (
+          <>
+            <button type="button" onClick={() => setPending(false)}>
+              Finish refresh
+            </button>
+            <TodoList
+              state={{ state: "ready", items: list }}
+              deletion={{
+                isPending: pending,
+                pendingTodoId: items[0].id,
+                error: null,
+                onDelete: async (id) => {
+                  setPending(true);
+                  // The list drops the row while the mutation is still pending.
+                  setList((current) => current.filter((todo) => todo.id !== id));
+                },
+              }}
+            />
+          </>
+        );
+      }
+      render(<SlowRefresh />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Delete Buy oat milk" }));
+      const next = screen.getByRole("button", { name: "Delete Water the plants" });
+      expect(next).toBeDisabled();
+      (document.activeElement as HTMLElement | null)?.blur();
+
+      fireEvent.click(screen.getByRole("button", { name: "Finish refresh" }));
+
+      expect(next).toBeEnabled();
+      expect(next).toHaveFocus();
     });
 
     it("focuses the previous row's Delete action when the last row is removed", async () => {
