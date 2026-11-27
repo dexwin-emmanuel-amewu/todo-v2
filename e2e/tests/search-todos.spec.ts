@@ -32,7 +32,8 @@ async function mockApi(page: Page) {
     (url) => url.pathname === "/todos",
     (route) => {
       const url = new URL(route.request().url());
-      requests.push(`${url.pathname}${url.search}`);
+      // The toggle-all summary reads use pageSize=1. They are not part of the list flow.
+      if (url.searchParams.get("pageSize") !== "1") requests.push(`${url.pathname}${url.search}`);
       const status = url.searchParams.get("status");
       const search = url.searchParams.get("search")?.toLowerCase();
       const items = todos.filter(
@@ -58,7 +59,7 @@ test("typing a search sends one request, updates the URL, and shows only matches
 }) => {
   const requests = await mockApi(page);
   await page.goto("/");
-  await expect(page.getByText("3 todos")).toBeVisible();
+  await expect(page.getByText("3 todos", { exact: true })).toBeVisible();
 
   await searchBox(page).pressSequentially("milk");
 
@@ -82,7 +83,7 @@ test("search combines with the status and clearing it restores the unsearched li
 
   await page.getByRole("button", { name: "Clear search" }).click();
 
-  await expect(page.getByText("2 completed todos")).toBeVisible();
+  await expect(page.getByText("2 completed todos", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/\?status=completed$/);
   await expect(searchBox(page)).toHaveValue("");
   await expect(searchBox(page)).toBeFocused();
@@ -101,14 +102,14 @@ test("a search with no matches shows a message that can clear it", async ({ page
 
   await expect(page.getByRole("heading", { name: 'No todos match "zzz".' })).toBeVisible();
   await page.getByRole("button", { name: "Clear search" }).last().click();
-  await expect(page.getByText("3 todos")).toBeVisible();
+  await expect(page.getByText("3 todos", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
 });
 
 test("a search over 100 characters shows a message and sends no request", async ({ page }) => {
   const requests = await mockApi(page);
   await page.goto("/");
-  await expect(page.getByText("3 todos")).toBeVisible();
+  await expect(page.getByText("3 todos", { exact: true })).toBeVisible();
 
   await searchBox(page).fill("a".repeat(101));
 
@@ -129,7 +130,7 @@ test("a failed search shows the retry alert and retry loads the results", async 
     },
   );
   await page.goto("/");
-  await expect(page.getByText("3 todos")).toBeVisible();
+  await expect(page.getByText("3 todos", { exact: true })).toBeVisible();
 
   await searchBox(page).fill("oat");
   await expect(page.getByRole("alert")).toContainText("Could not load your todos.");

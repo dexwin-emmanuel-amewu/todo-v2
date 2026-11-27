@@ -518,6 +518,7 @@ export function TodoList({
   search,
   totalItems,
   onClearSearch,
+  bulkPending = false,
 }: {
   state: TodoListViewState;
   filter?: TodoStatusFilter;
@@ -527,6 +528,7 @@ export function TodoList({
   completion?: CompletionControls;
   replacement?: ReplacementControls;
   deletion?: DeletionControls;
+  bulkPending?: boolean;
 }) {
   const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
   const editButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -550,7 +552,7 @@ export function TodoList({
     if (button) deleteButtonRefs.current.set(todoId, button);
     else deleteButtonRefs.current.delete(todoId);
   };
-  const busy = completion.isPending || replacement.isPending || deletion.isPending;
+  const busy = completion.isPending || replacement.isPending || deletion.isPending || bulkPending;
   const activeEditingId = items?.some((item) => item.id === editingTodoId) ? editingTodoId : null;
 
   async function onDelete(todo: Todo) {
@@ -577,21 +579,27 @@ export function TodoList({
   useLayoutEffect(() => {
     const pending = pendingDeletionFocus.current;
     if (!pending || !items || items.some((item) => item.id === pending.todoId)) return;
-    pendingDeletionFocus.current = null;
 
     const active = document.activeElement;
-    if (active && active !== document.body) return;
+    if (active && active !== document.body) {
+      pendingDeletionFocus.current = null;
+      return;
+    }
 
     const target = [pending.nextId, pending.prevId]
       .map((id) => (id ? deleteButtonRefs.current.get(id) : undefined))
       .find((button) => button !== undefined);
+
+    if (target?.disabled) return;
+
+    pendingDeletionFocus.current = null;
     // The deleted row may have been alone on its page, so the list moved to the previous page.
     const lastRow = items.at(-1);
     const fallback = lastRow ? deleteButtonRefs.current.get(lastRow.id) : undefined;
     if (target) target.focus();
     else if (fallback) fallback.focus();
     else emptyHeadingRef.current?.focus();
-  }, [items]);
+  }, [items, deletion.isPending]);
 
   // Holds the area at the last list's height while a new filter loads, so the page does not jump.
   useLayoutEffect(() => {
@@ -649,7 +657,7 @@ export function TodoList({
             registerDeleteButton={registerDeleteButton}
             emptyHeadingRef={emptyHeadingRef}
             emptyMessage={emptyMessage(filter, search)}
-            locked={listState.state === "loading_query"}
+            locked={listState.state === "loading_query" || bulkPending}
             onClearSearch={
               search && listState.state !== "loading_query" ? onClearSearch : undefined
             }
