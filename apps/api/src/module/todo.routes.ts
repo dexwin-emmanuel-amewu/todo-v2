@@ -1,4 +1,5 @@
 import {
+  type BatchConflictErrorResponse,
   type ClearCompletedTodosResponse,
   type InternalErrorResponse,
   type NotFoundErrorResponse,
@@ -6,6 +7,7 @@ import {
   type Todo,
   type TodoListResponse,
   type TodoStatusFilter,
+  type UpdateSelectedTodosResponse,
   clearCompletedTodosResponseSchema,
   setAllTodosCompletedResponseSchema,
   todoIdParamSchema,
@@ -15,13 +17,19 @@ import {
   todoSchema,
   todoSearchQuerySchema,
   todoStatusFilterSchema,
+  updateSelectedTodosResponseSchema,
 } from "@todo/contracts";
 import type { FastifyInstance } from "fastify";
 import { err, ok, type Result } from "neverthrow";
 import { match } from "ts-pattern";
 import type { z } from "zod";
 
-import type { DatabaseError, NotFoundError, ValidationError } from "../db/errors.js";
+import type {
+  BatchConflictError,
+  DatabaseError,
+  NotFoundError,
+  ValidationError,
+} from "../db/errors.js";
 import type { Db, PaginatedTodos, TodoPagination } from "./todo.repository.js";
 import { deleteCompletedTodos, deleteTodoById, getTodoById, listTodos } from "./todo.repository.js";
 import {
@@ -30,6 +38,7 @@ import {
   replaceTodoService,
   type RequestValidationError,
   setAllTodosCompletedService,
+  updateSelectedTodosService,
 } from "./todo.service.js";
 
 const internalErrorBody: InternalErrorResponse = { error: { type: "internal" } };
@@ -338,6 +347,42 @@ export function toSetAllTodosCompletedResponse(
     .exhaustive();
 }
 
+type UpdateSelectedTodosRouteResponse =
+  | { status: 200; body: UpdateSelectedTodosResponse }
+  | { status: 400; body: { error: { type: "validation"; issues: string[] } } }
+  | { status: 409; body: BatchConflictErrorResponse }
+  | { status: 500; body: InternalErrorResponse };
+
+export function toUpdateSelectedTodosResponse(
+  result: Result<
+    { updatedCount: number },
+    RequestValidationError | BatchConflictError | DatabaseError
+  >,
+): UpdateSelectedTodosRouteResponse {
+  if (result.isOk()) {
+    const validated = updateSelectedTodosResponseSchema.safeParse(result.value);
+
+    return validated.success
+      ? { status: 200, body: validated.data }
+      : { status: 500, body: internalErrorBody };
+  }
+
+  return match(result.error)
+    .with({ type: "request_validation" }, ({ issues }): UpdateSelectedTodosRouteResponse => ({
+      status: 400,
+      body: { error: { type: "validation", issues } },
+    }))
+    .with({ type: "batch_conflict" }, ({ missingIds }): UpdateSelectedTodosRouteResponse => ({
+      status: 409,
+      body: { error: { type: "batch_conflict", missingIds } },
+    }))
+    .with({ type: "database" }, (): UpdateSelectedTodosRouteResponse => ({
+      status: 500,
+      body: internalErrorBody,
+    }))
+    .exhaustive();
+}
+
 type ClearCompletedTodosRouteResponse =
   | { status: 200; body: ClearCompletedTodosResponse }
   | { status: 400; body: { error: { type: "validation"; issues: string[] } } }
@@ -453,6 +498,17 @@ export function registerTodoRoutes(app: FastifyInstance, db: Db): void {
     }
 
     const { status, body } = toSetAllTodosCompletedResponse(result);
+    return reply.status(status).send(body);
+  });
+
+  app.patch("/todos/batch", async (request, reply) => {
+    const result = await updateSelectedTodosService(db, request.body);
+
+    if (result.isErr() && result.error.type === "database") {
+      request.log.error({ err: result.error }, "PATCH /todos/batch failed");
+    }
+
+    const { status, body } = toUpdateSelectedTodosResponse(result);
     return reply.status(status).send(body);
   });
 

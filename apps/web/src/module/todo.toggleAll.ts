@@ -53,7 +53,11 @@ export function getToggleAllErrorMessage(error: unknown): string {
           { type: "http", status: 400 },
           () => "The todos could not be updated. Refresh and try again.",
         )
-        .with({ type: "http" }, () => "The server could not update your todos. Try again.")
+        .with(
+          { type: "http" },
+          { type: "batch_conflict" },
+          () => "The server could not update your todos. Try again.",
+        )
         .with({ type: "network" }, () => "Could not reach the server. Your todos were not changed.")
         .with(
           { type: "response_validation" },

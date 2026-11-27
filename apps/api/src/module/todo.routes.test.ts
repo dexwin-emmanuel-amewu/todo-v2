@@ -1,10 +1,12 @@
 import {
+  batchConflictErrorResponseSchema,
   clearCompletedTodosResponseSchema,
   internalErrorResponseSchema,
   notFoundErrorResponseSchema,
   setAllTodosCompletedResponseSchema,
   todoListResponseSchema,
   todoSchema,
+  updateSelectedTodosResponseSchema,
   validationErrorResponseSchema,
   type Todo,
 } from "@todo/contracts";
@@ -20,7 +22,7 @@ import {
   migrateDisposableDatabase,
 } from "../db/test-db";
 import { buildApp } from "./app.js";
-import { createTodo, getTodoById } from "./todo.repository.js";
+import { createTodo, type Db, getTodoById } from "./todo.repository.js";
 import {
   patchTodoService,
   replaceTodoService,
@@ -40,6 +42,7 @@ import {
   toPatchTodoResponse,
   toReplaceTodoResponse,
   toSetAllTodosCompletedResponse,
+  toUpdateSelectedTodosResponse,
 } from "./todo.routes.js";
 
 const exampleTodo: Todo = {
@@ -2259,5 +2262,183 @@ describe("DELETE /todos?status=completed, empty collection", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ deletedCount: 0 });
+  });
+});
+
+describe("toUpdateSelectedTodosResponse", () => {
+  it("maps a successful update to 200 with the count", () => {
+    const response = toUpdateSelectedTodosResponse(ok({ updatedCount: 2 }));
+
+    expect(response).toEqual({ status: 200, body: { updatedCount: 2 } });
+  });
+
+  it("maps a request validation error to 400", () => {
+    const response = toUpdateSelectedTodosResponse(
+      err({ type: "request_validation", issues: ["ids must be unique"] }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.body).success).toBe(true);
+  });
+
+  it("maps a batch conflict to 409 with the missing ids", () => {
+    const response = toUpdateSelectedTodosResponse(
+      err({ type: "batch_conflict", missingIds: [exampleTodo.id] }),
+    );
+
+    expect(response).toEqual({
+      status: 409,
+      body: { error: { type: "batch_conflict", missingIds: [exampleTodo.id] } },
+    });
+  });
+
+  it("maps a database error to 500 without leaking the cause", () => {
+    const response = toUpdateSelectedTodosResponse(
+      err({ type: "database", cause: new Error("boom") }),
+    );
+
+    expect(response).toEqual({ status: 500, body: { error: { type: "internal" } } });
+  });
+});
+
+describe("PATCH /todos/batch", () => {
+  let database: DisposableDatabase;
+  const missingId = "00000000-0000-4000-8000-000000000000";
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  async function seed(title: string) {
+    const created = await createTodo(database.db, { title });
+    if (created.isErr()) throw created.error;
+    return created.value;
+  }
+
+  async function completedOf(id: string) {
+    const found = await getTodoById(database.db, id);
+    if (found.isErr()) throw found.error;
+    return found.value.completed;
+  }
+
+  it("marks the listed todos completed, returns the count, and leaves the rest", async () => {
+    const app = buildApp(database.db);
+    const first = await seed("Route batch first");
+    const second = await seed("Route batch second");
+    const other = await seed("Route batch other");
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/todos/batch",
+      payload: { ids: [first.id, second.id], completed: true },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(updateSelectedTodosResponseSchema.parse(response.json())).toEqual({ updatedCount: 2 });
+    expect(await completedOf(first.id)).toBe(true);
+    expect(await completedOf(second.id)).toBe(true);
+    expect(await completedOf(other.id)).toBe(false);
+
+    const back = await app.inject({
+      method: "PATCH",
+      url: "/todos/batch",
+      payload: { ids: [first.id], completed: false },
+    });
+    expect(back.json()).toEqual({ updatedCount: 1 });
+    expect(await completedOf(first.id)).toBe(false);
+  });
+
+  it("accepts 100 ids in one transaction", async () => {
+    const app = buildApp(database.db);
+    const ids: string[] = [];
+    for (let n = 0; n < 100; n += 1) ids.push((await seed(`Hundred batch ${n}`)).id);
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/todos/batch",
+      payload: { ids, completed: true },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ updatedCount: 100 });
+  });
+
+  it.each([
+    ["an empty ids list", { ids: [], completed: true }],
+    ["101 ids", { ids: Array.from({ length: 101 }, () => missingId), completed: true }],
+    ["a duplicate id", { ids: [missingId, missingId], completed: true }],
+    ["a non-UUID id", { ids: ["abc"], completed: true }],
+    ["a missing completed", { ids: [missingId] }],
+    ["a string completed", { ids: [missingId], completed: "true" }],
+  ])("returns 400 for %s and changes nothing", async (_, payload) => {
+    const app = buildApp(database.db);
+    const todo = await seed("Validation untouched");
+
+    const response = await app.inject({ method: "PATCH", url: "/todos/batch", payload });
+
+    expect(response.statusCode).toBe(400);
+    expect(validationErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+    expect(await completedOf(todo.id)).toBe(false);
+  });
+
+  it("returns 400 for a missing body", async () => {
+    const app = buildApp(database.db);
+
+    const response = await app.inject({ method: "PATCH", url: "/todos/batch" });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("returns 409 batch_conflict with the missing ids and changes nothing", async () => {
+    const app = buildApp(database.db);
+    const existing = await seed("Conflict existing");
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/todos/batch",
+      payload: { ids: [existing.id, missingId], completed: true },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(batchConflictErrorResponseSchema.parse(response.json())).toEqual({
+      error: { type: "batch_conflict", missingIds: [missingId] },
+    });
+    expect(await completedOf(existing.id)).toBe(false);
+  });
+
+  it("returns 500 with the internal body when the database fails", async () => {
+    const failingDb = {
+      transaction: () => Promise.reject(new Error("connection lost")),
+    } as unknown as Db;
+    const app = buildApp(failingDb);
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/todos/batch",
+      payload: { ids: [missingId], completed: true },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(internalErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+  });
+
+  it("is not handled by PATCH /todos/:todoId", async () => {
+    const app = buildApp(database.db);
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/todos/batch",
+      payload: { ids: [missingId], completed: true },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(batchConflictErrorResponseSchema.parse(response.json())).toEqual({
+      error: { type: "batch_conflict", missingIds: [missingId] },
+    });
   });
 });

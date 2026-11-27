@@ -1,4 +1,5 @@
 import {
+  batchConflictErrorResponseSchema,
   type ClearCompletedTodosResponse,
   clearCompletedTodosResponseSchema,
   type Todo,
@@ -16,6 +17,10 @@ import {
   todoIdParamSchema,
   todoSchema,
   todoStatusFilterSchema,
+  type UpdateSelectedTodosInput,
+  type UpdateSelectedTodosResponse,
+  updateSelectedTodosResponseSchema,
+  updateSelectedTodosSchema,
 } from "@todo/contracts";
 
 import { DEFAULT_PAGE_SIZE } from "../module/todo.pagination";
@@ -24,23 +29,26 @@ import type { TodoSummary } from "../module/todo.toggleAll";
 
 export const TODO_API_BASE_URL = import.meta.env.VITE_API_URL ?? "";
 
-export type TodoApiErrorType = "network" | "http" | "request_validation" | "response_validation";
+export type TodoApiErrorType =
+  "network" | "http" | "request_validation" | "response_validation" | "batch_conflict";
 
 export class TodoApiError extends Error {
   readonly type: TodoApiErrorType;
   readonly status?: number;
   readonly issues?: string[];
+  readonly missingIds?: string[];
 
   constructor(
     type: TodoApiErrorType,
     message: string,
-    details: { status?: number; issues?: string[]; cause?: unknown } = {},
+    details: { status?: number; issues?: string[]; missingIds?: string[]; cause?: unknown } = {},
   ) {
     super(message, { cause: details.cause });
     this.name = "TodoApiError";
     this.type = type;
     this.status = details.status;
     this.issues = details.issues;
+    this.missingIds = details.missingIds;
   }
 }
 
@@ -171,6 +179,71 @@ export async function setAllTodosCompleted(
   }
 
   const parsed = setAllTodosCompletedResponseSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new TodoApiError("response_validation", "The API response did not match the contract.", {
+      issues: parsed.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  return parsed.data;
+}
+
+export async function updateSelectedTodos(
+  input: UpdateSelectedTodosInput,
+): Promise<UpdateSelectedTodosResponse> {
+  const parsedBody = updateSelectedTodosSchema.safeParse(input);
+
+  if (!parsedBody.success) {
+    throw new TodoApiError("request_validation", "The selected todos request was invalid.", {
+      issues: parsedBody.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(`${TODO_API_BASE_URL}/todos/batch`, {
+      method: "PATCH",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(parsedBody.data),
+    });
+  } catch (cause) {
+    throw new TodoApiError("network", "Could not reach the API.", { cause });
+  }
+
+  let body: unknown;
+
+  try {
+    body = await response.json();
+  } catch (cause) {
+    if (!response.ok) {
+      throw new TodoApiError("http", `The API responded with ${response.status}.`, {
+        status: response.status,
+      });
+    }
+    throw new TodoApiError("response_validation", "The API response was not valid JSON.", {
+      cause,
+    });
+  }
+
+  if (response.status === 409) {
+    const conflict = batchConflictErrorResponseSchema.safeParse(body);
+    if (conflict.success) {
+      throw new TodoApiError("batch_conflict", "Some selected todos no longer exist.", {
+        status: 409,
+        missingIds: conflict.data.error.missingIds,
+      });
+    }
+  }
+
+  if (!response.ok) {
+    throw new TodoApiError("http", `The API responded with ${response.status}.`, {
+      status: response.status,
+    });
+  }
+
+  const parsed = updateSelectedTodosResponseSchema.safeParse(body);
 
   if (!parsed.success) {
     throw new TodoApiError("response_validation", "The API response did not match the contract.", {

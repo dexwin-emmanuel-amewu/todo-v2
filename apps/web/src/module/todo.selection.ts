@@ -22,6 +22,7 @@ export type SelectionAction =
   | { type: "toggle_row"; id: string }
   | { type: "select_page"; ids: readonly string[] }
   | { type: "unselect_page"; ids: readonly string[] }
+  | { type: "remove_ids"; ids: readonly string[] }
   | { type: "clear" }
   | { type: "scope_changed"; scope: SelectionScope }
   | { type: "list_emptied" };
@@ -57,7 +58,7 @@ export function selectionReducer(state: SelectionState, action: SelectionAction)
       if (next.size > SELECTION_LIMIT) return { ...state, notice: "limit" as const };
       return { ...state, selectedIds: next, notice: null };
     })
-    .with({ type: "unselect_page" }, ({ ids }) => {
+    .with({ type: "unselect_page" }, { type: "remove_ids" }, ({ ids }) => {
       const next = new Set(state.selectedIds);
       for (const id of ids) next.delete(id);
       return { ...state, selectedIds: next, notice: null };
