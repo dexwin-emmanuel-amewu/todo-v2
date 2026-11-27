@@ -10,6 +10,7 @@ import {
 } from "../db/test-db";
 import {
   createTodo,
+  deleteSelectedTodos,
   deleteCompletedTodos,
   deleteTodoById,
   getTodoById,
@@ -957,6 +958,76 @@ describe("todos repository, updateSelectedTodos", () => {
     } as unknown as Db;
 
     const result = await updateSelectedTodos(failingDb, [missingId], true);
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.type).toBe("database");
+    }
+  });
+});
+
+describe("todos repository, deleteSelectedTodos", () => {
+  let database: DisposableDatabase;
+  const missingId = "00000000-0000-4000-8000-000000000000";
+
+  beforeAll(async () => {
+    database = await createDisposableDatabase();
+    await migrateDisposableDatabase(database);
+  }, 20_000);
+
+  afterAll(async () => {
+    await dropDisposableDatabase(database);
+  }, 20_000);
+
+  async function seed(...titles: string[]) {
+    const created = [];
+    for (const title of titles) {
+      const result = await createTodo(database.db, { title });
+      if (result.isErr()) throw result.error;
+      created.push(result.value);
+    }
+    return created;
+  }
+
+  async function exists(id: string) {
+    return (await getTodoById(database.db, id)).isOk();
+  }
+
+  it("deletes only the listed todos and returns their count", async () => {
+    const [first, second, other] = await seed(
+      "Delete batch first",
+      "Delete batch second",
+      "Delete batch other",
+    );
+
+    const result = await deleteSelectedTodos(database.db, [first.id, second.id]);
+    if (result.isErr()) throw result.error;
+
+    expect(result.value).toEqual({ deletedCount: 2 });
+    expect(await exists(first.id)).toBe(false);
+    expect(await exists(second.id)).toBe(false);
+    expect(await exists(other.id)).toBe(true);
+  });
+
+  it("returns batch_conflict with the missing ids and deletes nothing", async () => {
+    const [first, second] = await seed("Delete conflict first", "Delete conflict second");
+
+    const result = await deleteSelectedTodos(database.db, [first.id, missingId, second.id]);
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error).toEqual({ type: "batch_conflict", missingIds: [missingId] });
+    }
+    expect(await exists(first.id)).toBe(true);
+    expect(await exists(second.id)).toBe(true);
+  });
+
+  it("returns a database error when the transaction fails", async () => {
+    const failingDb = {
+      transaction: () => Promise.reject(new Error("connection lost")),
+    } as unknown as Db;
+
+    const result = await deleteSelectedTodos(failingDb, [missingId]);
 
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {

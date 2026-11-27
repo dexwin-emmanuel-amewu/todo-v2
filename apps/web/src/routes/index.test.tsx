@@ -133,7 +133,6 @@ function makeTodos(count: number, isCompleted: (index: number) => boolean): Serv
   }));
 }
 
-// A small in-memory server for GET /todos, PATCH /todos, and DELETE /todos?status=completed.
 function fakeServer(initial: ServerTodo[]) {
   const state = { items: initial.map((todo) => ({ ...todo })) };
   const patchBodies: unknown[] = [];
@@ -142,8 +141,22 @@ function fakeServer(initial: ServerTodo[]) {
   let deleteOverride: (() => Promise<Response>) | undefined;
   const batchBodies: { ids: string[]; completed: boolean }[] = [];
   let batchOverride: (() => Promise<Response>) | undefined;
+  const batchDeleteBodies: { ids: string[] }[] = [];
+  let batchDeleteOverride: (() => Promise<Response>) | undefined;
 
   async function handle(url: string, init?: RequestInit): Promise<Response> {
+    if (init?.method === "POST" && url === "/todos/batch-delete") {
+      const body = JSON.parse(String(init.body)) as { ids: string[] };
+      batchDeleteBodies.push(body);
+      if (batchDeleteOverride) return batchDeleteOverride();
+      const missingIds = body.ids.filter((id) => !state.items.some((todo) => todo.id === id));
+      if (missingIds.length > 0) {
+        return jsonResponse({ error: { type: "batch_conflict", missingIds } }, 409);
+      }
+      state.items = state.items.filter((todo) => !body.ids.includes(todo.id));
+      return jsonResponse({ deletedCount: body.ids.length });
+    }
+
     if (init?.method === "PATCH" && url === "/todos/batch") {
       const body = JSON.parse(String(init.body)) as { ids: string[]; completed: boolean };
       batchBodies.push(body);
@@ -217,6 +230,13 @@ function fakeServer(initial: ServerTodo[]) {
     },
     restoreBatch() {
       batchOverride = undefined;
+    },
+    batchDeleteBodies,
+    failBatchDeleteWith(response: () => Promise<Response>) {
+      batchDeleteOverride = response;
+    },
+    restoreBatchDelete() {
+      batchDeleteOverride = undefined;
     },
   };
 }
@@ -1699,7 +1719,7 @@ describe("HomePage selection mode", () => {
     expect(screen.queryByRole("checkbox", { name: /^Mark all/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Clear (all|the)/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: /^Mark Todo/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^(Edit|Delete) / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^(Edit|Delete) Todo/ })).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Select Todo number 1" })).not.toBeChecked();
     expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("Completed");
   });
@@ -2066,6 +2086,32 @@ describe("HomePage selected completion", () => {
     expect(rowText(3)).toHaveTextContent("Active");
   });
 
+  it("leaves focus in the search box when an update finishes", async () => {
+    const server = fakeServer(makeTodos(3, () => false));
+    let release: () => void = () => {};
+    server.failBatchWith(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = () => {
+            server.state.items[0].completed = true;
+            resolve(jsonResponse({ updatedCount: 1 }));
+          };
+        }),
+    );
+    renderPage();
+    const group = await selectRows(1);
+
+    await userEvent.click(within(group).getByRole("button", completedButton));
+    await within(group).findByText("Marking 1 todo as completed");
+    const searchBox = screen.getByRole("searchbox", { name: "Search todos" });
+    await userEvent.click(searchBox);
+    release();
+
+    expect(await within(group).findByText("1 todo marked as completed")).toBeInTheDocument();
+    expect(within(group).getAllByRole("status")[0]).toHaveTextContent("0 selected");
+    expect(searchBox).toHaveFocus();
+  });
+
   it("marks selected todos active", async () => {
     const server = fakeServer(makeTodos(2, () => true));
     renderPage();
@@ -2156,6 +2202,231 @@ describe("HomePage selected completion", () => {
 
     await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 1" }));
     await userEvent.click(within(group).getByRole("button", completedButton));
+    await within(group).findByRole("alert");
+    await userEvent.click(await filterLink("Active"));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+});
+
+describe("HomePage selected deletion", () => {
+  const id = (number: number) => makeTodos(number, () => false)[number - 1].id;
+
+  async function selectRows(...numbers: number[]) {
+    await userEvent.click(await screen.findByRole("button", { name: "Select todos" }));
+    for (const number of numbers) {
+      await userEvent.click(screen.getByRole("checkbox", { name: `Select Todo number ${number}` }));
+    }
+    return screen.getByRole("group", { name: "Selection" });
+  }
+
+  function deleteButton(group: HTMLElement) {
+    return within(group).getByRole("button", { name: /^Delete (\d+ )?selected todos?$/ });
+  }
+
+  it("names the count, notes the deletion is permanent, and is disabled with nothing selected", async () => {
+    fakeServer(makeTodos(2, () => false));
+    renderPage();
+    const group = await selectRows();
+
+    const button = within(group).getByRole("button", { name: "Delete selected todos" });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveAccessibleDescription("Deleted todos cannot be restored.");
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 1" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 2" }));
+    expect(within(group).getByRole("button", { name: "Delete 2 selected todos" })).toBeVisible();
+  });
+
+  it("locks the selection while pending and removes rows only after the server answers", async () => {
+    const server = fakeServer(makeTodos(3, () => false));
+    let release: () => void = () => {};
+    server.failBatchDeleteWith(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = () => {
+            server.state.items = server.state.items.slice(2);
+            resolve(jsonResponse({ deletedCount: 2 }));
+          };
+        }),
+    );
+    renderPage();
+    const group = await selectRows(1, 2);
+
+    await userEvent.click(deleteButton(group));
+
+    expect(await within(group).findByText("Deleting 2 todos")).toBeInTheDocument();
+    for (const name of [
+      "Select this page",
+      "Clear selection",
+      "Done",
+      "Mark selected as completed",
+      "Mark selected as active",
+      "Delete 2 selected todos",
+    ]) {
+      expect(within(group).getByRole("button", { name })).toHaveAttribute("aria-disabled", "true");
+    }
+    expect(screen.getByRole("checkbox", { name: "Select Todo number 3" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("group", { name: "Selection" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Select Todo number 1" })).toBeInTheDocument();
+
+    release();
+
+    expect(await within(group).findByText("Deleted 2 todos.")).toBeInTheDocument();
+    expect(server.batchDeleteBodies).toEqual([{ ids: [id(1), id(2)] }]);
+    await waitFor(() =>
+      expect(screen.queryByRole("checkbox", { name: "Select Todo number 1" })).toBeNull(),
+    );
+    expect(screen.queryByRole("checkbox", { name: "Select Todo number 2" })).toBeNull();
+    expect(screen.getByRole("checkbox", { name: "Select Todo number 3" })).toBeInTheDocument();
+    expect(within(group).getAllByRole("status")[0]).toHaveTextContent("0 selected");
+    expect(within(group).getByRole("button", { name: "Select this page" })).toHaveFocus();
+  });
+
+  it("leaves focus in the search box when a delete finishes", async () => {
+    const server = fakeServer(makeTodos(3, () => false));
+    let release: () => void = () => {};
+    server.failBatchDeleteWith(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = () => {
+            server.state.items = server.state.items.slice(1);
+            resolve(jsonResponse({ deletedCount: 1 }));
+          };
+        }),
+    );
+    renderPage();
+    const group = await selectRows(1);
+
+    await userEvent.click(deleteButton(group));
+    await within(group).findByText("Deleting 1 todo");
+    const searchBox = screen.getByRole("searchbox", { name: "Search todos" });
+    await userEvent.click(searchBox);
+    release();
+
+    expect(await within(group).findByText("Deleted 1 todo.")).toBeInTheDocument();
+    expect(within(group).getAllByRole("status")[0]).toHaveTextContent("0 selected");
+    expect(searchBox).toHaveFocus();
+  });
+
+  it("focuses the empty heading when every todo is deleted", async () => {
+    fakeServer(makeTodos(1, () => false));
+    renderPage();
+    const group = await selectRows(1);
+
+    await userEvent.click(deleteButton(group));
+
+    await waitFor(() => expect(screen.getByRole("heading", { level: 2 })).toHaveFocus());
+    expect(screen.queryByRole("group", { name: "Selection" })).toBeNull();
+  });
+
+  it("removes missing ids on a conflict, deletes nothing, and retries the rest", async () => {
+    const server = fakeServer(makeTodos(4, () => false));
+    renderPage();
+    const group = await selectRows(1, 2, 3);
+    server.state.items = server.state.items.filter((todo) => todo.title !== "Todo number 2");
+    const getsBefore = listGetCount();
+
+    await userEvent.click(deleteButton(group));
+
+    const alert = await within(group).findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "1 selected todo no longer exists. It was removed from the selection. Nothing was deleted.",
+    );
+    expect(within(group).getAllByRole("status")[0]).toHaveTextContent("2 selected");
+    await waitFor(() => expect(listGetCount()).toBeGreaterThan(getsBefore));
+    expect(server.state.items).toHaveLength(3);
+    expect(deleteButton(group)).toHaveFocus();
+
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+
+    expect(await within(group).findByText("Deleted 2 todos.")).toBeInTheDocument();
+    expect(server.batchDeleteBodies[1]).toEqual({ ids: [id(1), id(3)] });
+    expect(server.state.items.map((todo) => todo.title)).toEqual(["Todo number 4"]);
+  });
+
+  it("offers no retry when every selected todo is gone", async () => {
+    const server = fakeServer(makeTodos(2, () => false));
+    renderPage();
+    const group = await selectRows(1);
+    server.state.items = server.state.items.filter((todo) => todo.title !== "Todo number 1");
+
+    await userEvent.click(deleteButton(group));
+
+    const alert = await within(group).findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "None of the selected todos exist anymore. Nothing was deleted.",
+    );
+    expect(within(alert).queryByRole("button")).toBeNull();
+    expect(within(group).getAllByRole("status")[0]).toHaveTextContent("0 selected");
+  });
+
+  it("keeps the selection and focus on a server error and retries the same ids", async () => {
+    const server = fakeServer(makeTodos(3, () => false));
+    server.failBatchDeleteWith(async () => jsonResponse({ error: { type: "internal" } }, 500));
+    renderPage();
+    const group = await selectRows(1, 2);
+    const getsBefore = listGetCount();
+
+    await userEvent.click(deleteButton(group));
+
+    const alert = await within(group).findByRole("alert");
+    expect(alert).toHaveTextContent("Could not delete the selected todos. Nothing was deleted.");
+    expect(within(group).getAllByRole("status")[0]).toHaveTextContent("2 selected");
+    expect(deleteButton(group)).toHaveFocus();
+    await waitFor(() => expect(listGetCount()).toBeGreaterThan(getsBefore));
+    expect(screen.getByRole("checkbox", { name: "Select Todo number 1" })).toBeChecked();
+
+    server.restoreBatchDelete();
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+
+    expect(await within(group).findByText("Deleted 2 todos.")).toBeInTheDocument();
+    expect(server.batchDeleteBodies[1]).toEqual(server.batchDeleteBodies[0]);
+  });
+
+  it("shows only the latest batch message", async () => {
+    fakeServer(makeTodos(3, () => false));
+    renderPage();
+    const group = await selectRows(1);
+
+    await userEvent.click(
+      within(group).getByRole("button", { name: "Mark selected as completed" }),
+    );
+    expect(await within(group).findByText("1 todo marked as completed")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 2" }));
+    await userEvent.click(deleteButton(group));
+    expect(await within(group).findByText("Deleted 1 todo.")).toBeInTheDocument();
+    expect(within(group).queryByText("1 todo marked as completed")).toBeNull();
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 3" }));
+    await userEvent.click(within(group).getByRole("button", { name: "Mark selected as active" }));
+    expect(await within(group).findByText("1 todo marked as active")).toBeInTheDocument();
+    expect(within(group).queryByText("Deleted 1 todo.")).toBeNull();
+  });
+
+  it("clears the alert on Clear selection, on Done, and on a filter change", async () => {
+    const server = fakeServer(makeTodos(2, () => false));
+    server.failBatchDeleteWith(() => Promise.reject(new TypeError("Failed to fetch")));
+    renderPage();
+    let group = await selectRows(1);
+
+    await userEvent.click(deleteButton(group));
+    await within(group).findByRole("alert");
+    await userEvent.click(within(group).getByRole("button", { name: "Clear selection" }));
+    expect(within(group).queryByRole("alert")).toBeNull();
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Select Todo number 1" }));
+    await userEvent.click(deleteButton(group));
+    await within(group).findByRole("alert");
+    await userEvent.click(within(group).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    group = await selectRows(1);
+    await userEvent.click(deleteButton(group));
     await within(group).findByRole("alert");
     await userEvent.click(await filterLink("Active"));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
