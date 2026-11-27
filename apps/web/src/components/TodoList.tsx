@@ -40,6 +40,11 @@ type DeletionControls = {
   onDelete: (todoId: string) => Promise<unknown>;
 };
 
+export type SelectionControls = {
+  selectedIds: ReadonlySet<string>;
+  onToggleRow: (todoId: string) => void;
+};
+
 const noDeletionControls: DeletionControls = {
   isPending: false,
   error: null,
@@ -144,6 +149,20 @@ function deletionErrorMessage(error: unknown): string {
     .otherwise(() => "Something went wrong. The todo was not deleted. Try again.");
 }
 
+function TodoStatusBadge({ completed }: { completed: boolean }) {
+  return (
+    <span
+      className={
+        completed
+          ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700"
+          : "rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600"
+      }
+    >
+      {completed ? "Completed" : "Active"}
+    </span>
+  );
+}
+
 function TodoListItem({
   todo,
   controls,
@@ -157,6 +176,7 @@ function TodoListItem({
   onDelete,
   registerEditButton,
   registerDeleteButton,
+  selection,
 }: {
   todo: Todo;
   controls: CompletionControls;
@@ -170,6 +190,7 @@ function TodoListItem({
   onDelete: (todo: Todo) => void;
   registerEditButton: (todoId: string, button: HTMLButtonElement | null) => void;
   registerDeleteButton: (todoId: string, button: HTMLButtonElement | null) => void;
+  selection?: SelectionControls;
 }) {
   const [draft, setDraft] = useState(todo.title);
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
@@ -248,6 +269,29 @@ function TodoListItem({
       event.preventDefault();
       cancelEditing();
     }
+  }
+
+  if (selection) {
+    return (
+      <li className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <label className="flex min-w-0 flex-1 items-center gap-3">
+          <input
+            type="checkbox"
+            checked={selection.selectedIds.has(todo.id)}
+            disabled={locked}
+            aria-label={`Select ${todo.title}`}
+            onChange={() => selection.onToggleRow(todo.id)}
+            className="size-4 shrink-0 accent-sky-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-700"
+          />
+          <span
+            className={`${todo.completed ? "text-sm text-slate-400 line-through" : "text-sm"} min-w-0`}
+          >
+            {todo.title}
+          </span>
+        </label>
+        <TodoStatusBadge completed={todo.completed} />
+      </li>
+    );
   }
 
   return (
@@ -346,15 +390,7 @@ function TodoListItem({
             </span>
           </div>
           <div className="flex items-center gap-3">
-            <span
-              className={
-                todo.completed
-                  ? "rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700"
-                  : "rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600"
-              }
-            >
-              {todo.completed ? "Completed" : "Active"}
-            </span>
+            <TodoStatusBadge completed={todo.completed} />
             <button
               ref={(button) => registerEditButton(todo.id, button)}
               type="button"
@@ -431,6 +467,7 @@ function TodoItems({
   emptyHeadingRef,
   emptyMessage,
   onClearSearch,
+  selection,
 }: {
   items: Todo[];
   busy: boolean;
@@ -448,6 +485,7 @@ function TodoItems({
   emptyHeadingRef: RefObject<HTMLHeadingElement | null>;
   emptyMessage: string;
   onClearSearch?: () => void;
+  selection?: SelectionControls;
 }) {
   if (items.length === 0) {
     if (locked) return null;
@@ -489,6 +527,7 @@ function TodoItems({
           onDelete={onDelete}
           registerEditButton={registerEditButton}
           registerDeleteButton={registerDeleteButton}
+          selection={selection}
         />
       ))}
     </ul>
@@ -527,6 +566,7 @@ export function TodoList({
   onClearSearch,
   bulkPending = false,
   emptyHeadingRef: passedEmptyHeadingRef,
+  selection,
 }: {
   state: TodoListViewState;
   filter?: TodoStatusFilter;
@@ -538,6 +578,7 @@ export function TodoList({
   deletion?: DeletionControls;
   bulkPending?: boolean;
   emptyHeadingRef?: RefObject<HTMLHeadingElement | null>;
+  selection?: SelectionControls;
 }) {
   const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
   const editButtonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -668,6 +709,7 @@ export function TodoList({
             emptyHeadingRef={emptyHeadingRef}
             emptyMessage={emptyMessage(filter, search)}
             locked={listState.state === "loading_query" || bulkPending}
+            selection={selection}
             onClearSearch={
               search && listState.state !== "loading_query" ? onClearSearch : undefined
             }
