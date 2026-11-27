@@ -1,9 +1,11 @@
 import { createRoute, createRouter, redirect, type RouterHistory } from "@tanstack/react-router";
 
 import { getTodoListSearch } from "./module/todo.filter";
-import { getTodoListSearchLink } from "./module/todo.search";
+import { getTodoListPageLink } from "./module/todo.search";
 import { HomePage } from "./routes/index";
 import { rootRoute } from "./routes/root";
+
+const allowedKeys = ["status", "search", "page", "pageSize"];
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -12,11 +14,13 @@ const indexRoute = createRoute({
   beforeLoad: ({ location, search }) => {
     const raw = location.search as Record<string, unknown>;
     const isCanonical =
-      Object.keys(raw).every((key) => key === "status" || key === "search") &&
+      Object.keys(raw).every((key) => allowedKeys.includes(key)) &&
       raw.status === search.status &&
-      raw.search === search.search;
+      raw.search === search.search &&
+      raw.page === search.page &&
+      raw.pageSize === search.pageSize;
     if (!isCanonical) {
-      throw redirect({ to: "/", search: getTodoListSearchLink(search), replace: true });
+      throw redirect({ to: "/", search: getTodoListPageLink(search), replace: true });
     }
   },
   component: HomePage,

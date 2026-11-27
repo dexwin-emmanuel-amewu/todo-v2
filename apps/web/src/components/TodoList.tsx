@@ -443,7 +443,6 @@ function TodoItems({
   onClearSearch?: () => void;
 }) {
   if (items.length === 0) {
-    // The empty result belongs to the previous filter, so say nothing until the new one arrives.
     if (locked) return null;
 
     return (
@@ -586,8 +585,12 @@ export function TodoList({
     const target = [pending.nextId, pending.prevId]
       .map((id) => (id ? deleteButtonRefs.current.get(id) : undefined))
       .find((button) => button !== undefined);
+    // The deleted row may have been alone on its page, so the list moved to the previous page.
+    const lastRow = items.at(-1);
+    const fallback = lastRow ? deleteButtonRefs.current.get(lastRow.id) : undefined;
     if (target) target.focus();
-    else if (items.length === 0) emptyHeadingRef.current?.focus();
+    else if (fallback) fallback.focus();
+    else emptyHeadingRef.current?.focus();
   }, [items]);
 
   // Holds the area at the last list's height while a new filter loads, so the page does not jump.
@@ -633,10 +636,10 @@ export function TodoList({
           )}
           <TodoItems
             items={listState.items}
-            busy={busy}
-            refreshing={listState.state === "refreshing" || listState.state === "loading_query"}
+            busy={listState.state === "refreshing" || listState.state === "loading_query" || busy}
             controls={completion}
             replacement={replacement}
+            refreshing={listState.state === "refreshing"}
             deletion={deletion}
             editingTodoId={activeEditingId}
             onStartEdit={onStartEdit}

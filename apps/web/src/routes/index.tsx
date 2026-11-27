@@ -1,8 +1,9 @@
 import { getRouteApi } from "@tanstack/react-router";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 
 import { TodoFilters } from "../components/TodoFilters";
 import { TodoList } from "../components/TodoList";
+import { TodoPagination } from "../components/TodoPagination";
 import { TodoSearch } from "../components/TodoSearch";
 import { CreateTodoForm } from "../components/CreateTodoForm";
 import { usePatchTodoCompletionMutation } from "../hooks/usePatchTodoCompletionMutation";
@@ -10,8 +11,9 @@ import { useDeleteTodoMutation } from "../hooks/useDeleteTodoMutation";
 import { useReplaceTodoMutation } from "../hooks/useReplaceTodoMutation";
 import { useTodoListQuery } from "../hooks/useTodoListQuery";
 import { getTodoStatusFilter } from "../module/todo.filter";
-import { getTodoListSearchLink } from "../module/todo.search";
-import { getTodoListViewState } from "../module/todo.state";
+import { DEFAULT_PAGE_SIZE, getPageRedirect } from "../module/todo.pagination";
+import { getTodoListPageLink, getTodoListSearchLink } from "../module/todo.search";
+import { getTodoListViewState, type TodoListViewState } from "../module/todo.state";
 
 const homeRoute = getRouteApi("/");
 
@@ -21,19 +23,64 @@ export function HomePage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const filter = getTodoStatusFilter(urlSearch);
   const search = urlSearch.search;
-  const query = useTodoListQuery({ status: filter, search });
+  const page = urlSearch.page ?? 1;
+  const pageSize = urlSearch.pageSize ?? DEFAULT_PAGE_SIZE;
+  const query = useTodoListQuery({ status: filter, search, page, pageSize });
 
   const commitSearch = (next: string | undefined) =>
     void navigate({
       to: "/",
-      search: getTodoListSearchLink({ status: filter, search: next }),
+      search: getTodoListSearchLink({
+        status: filter,
+        search: next,
+        pageSize: urlSearch.pageSize,
+      }),
       replace: true,
     });
+  const goToPage = (nextPage: number) =>
+    void navigate({
+      to: "/",
+      search: getTodoListPageLink({
+        status: filter,
+        search,
+        pageSize: urlSearch.pageSize,
+        page: nextPage,
+      }),
+    });
+  const changePageSize = (nextSize: number) =>
+    void navigate({
+      to: "/",
+      search: getTodoListSearchLink({
+        status: filter,
+        search,
+        pageSize: nextSize === DEFAULT_PAGE_SIZE ? undefined : nextSize,
+      }),
+    });
+
+  // A page past the end, or a page above 1 on an empty list, moves to the last valid page.
+  const settled = query.isPlaceholderData ? undefined : query.data;
+  const redirectPage = settled
+    ? getPageRedirect({ page, totalPages: settled.totalPages, totalItems: settled.totalItems })
+    : undefined;
+
+  useEffect(() => {
+    if (redirectPage === undefined) return;
+    void navigate({
+      to: "/",
+      search: getTodoListPageLink({
+        status: filter,
+        search,
+        pageSize: urlSearch.pageSize,
+        page: redirectPage,
+      }),
+      replace: true,
+    });
+  }, [redirectPage, navigate, filter, search, urlSearch.pageSize]);
   const completionMutation = usePatchTodoCompletionMutation();
   const replacementMutation = useReplaceTodoMutation();
   const deletionMutation = useDeleteTodoMutation();
 
-  const state = getTodoListViewState({
+  const queryState = getTodoListViewState({
     status: query.status,
     isFetching: query.isFetching,
     isPlaceholderData: query.isPlaceholderData,
@@ -41,6 +88,14 @@ export function HomePage() {
     error: query.error,
     refetch: () => void query.refetch(),
   });
+  const state: TodoListViewState =
+    redirectPage === undefined ? queryState : { state: "initial_loading" };
+  const showPagination =
+    query.data !== undefined &&
+    redirectPage === undefined &&
+    (queryState.state === "ready" ||
+      queryState.state === "refreshing" ||
+      queryState.state === "loading_query");
 
   const completion = {
     isPending: completionMutation.isPending,
@@ -90,6 +145,18 @@ export function HomePage() {
         replacement={replacement}
         deletion={deletion}
       />
+      {showPagination && query.data && (
+        <TodoPagination
+          page={page}
+          pageSize={pageSize}
+          totalItems={query.data.totalItems}
+          totalPages={query.data.totalPages}
+          itemCount={query.data.items.length}
+          isLoading={queryState.state === "loading_query"}
+          onPageChange={goToPage}
+          onPageSizeChange={changePageSize}
+        />
+      )}
     </main>
   );
 }

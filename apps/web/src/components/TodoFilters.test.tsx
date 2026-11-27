@@ -109,6 +109,15 @@ describe("TodoFilters", () => {
     expect(links.active.getAttribute("href")).not.toContain("page");
   });
 
+  it("keeps the page size in every filter link", async () => {
+    renderFilters("/?pageSize=10&page=2");
+
+    const links = await filterLinks();
+
+    expect(links.all).toHaveAttribute("href", "/?pageSize=10");
+    expect(links.active).toHaveAttribute("href", "/?status=active&pageSize=10");
+  });
+
   it("keeps the selection on the filter that matches the status when a search is set", async () => {
     renderFilters("/?status=active&search=milk");
 
@@ -116,5 +125,24 @@ describe("TodoFilters", () => {
 
     expect(links.active).toHaveAttribute("aria-current", "page");
     expect(links.all).not.toHaveAttribute("aria-current");
+  });
+
+  it.each([
+    ["/?page=2", "all"],
+    ["/?status=active&page=2", "active"],
+  ] as const)("keeps the selected filter on %s", async (url, selected) => {
+    renderFilters(url);
+
+    const links = await filterLinks();
+
+    for (const [name, link] of Object.entries(links)) {
+      if (name === selected) {
+        expect(link).toHaveAttribute("aria-current", "page");
+        expect(link).toHaveClass("bg-slate-900");
+      } else {
+        expect(link).not.toHaveAttribute("aria-current");
+        expect(link).not.toHaveClass("bg-slate-900");
+      }
+    }
   });
 });

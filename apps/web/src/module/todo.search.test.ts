@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getTodoListSearchLink, normalizeSearch } from "./todo.search";
+import { getTodoListPageLink, getTodoListSearchLink, normalizeSearch } from "./todo.search";
 
 describe("normalizeSearch", () => {
   it("trims the text", () => {
@@ -39,5 +39,27 @@ describe("getTodoListSearchLink", () => {
     const link = getTodoListSearchLink({ status: "active", search: "milk", page: 3 } as never);
 
     expect(link).not.toHaveProperty("page");
+  });
+});
+
+describe("getTodoListSearchLink with a page size", () => {
+  it("keeps the page size", () => {
+    expect(getTodoListSearchLink({ status: "active", pageSize: 10 })).toEqual({
+      status: "active",
+      pageSize: 10,
+    });
+  });
+});
+
+describe("getTodoListPageLink", () => {
+  it("adds the page to the status, search, and page size", () => {
+    expect(
+      getTodoListPageLink({ status: "active", search: "milk", pageSize: 10, page: 3 }),
+    ).toEqual({ status: "active", search: "milk", pageSize: 10, page: 3 });
+  });
+
+  it("leaves out page 1 and a missing page", () => {
+    expect(getTodoListPageLink({ page: 1 })).toEqual({});
+    expect(getTodoListPageLink({})).toEqual({});
   });
 });
