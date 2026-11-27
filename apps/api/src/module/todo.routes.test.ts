@@ -2433,11 +2433,12 @@ describe("PATCH /todos/batch", () => {
     const response = await app.inject({
       method: "PATCH",
       url: "/todos/batch",
-      payload: { completed: true },
+      payload: { ids: [missingId], completed: true },
     });
 
-    expect(response.statusCode).toBe(400);
-    expect(response.json().error.issues).not.toContain("Invalid UUID");
-    expect(JSON.stringify(response.json())).toContain("ids");
+    expect(response.statusCode).toBe(409);
+    expect(batchConflictErrorResponseSchema.parse(response.json())).toEqual({
+      error: { type: "batch_conflict", missingIds: [missingId] },
+    });
   });
 });
