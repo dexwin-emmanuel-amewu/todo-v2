@@ -625,16 +625,6 @@ export function TodoList({
       { state: P.union("ready", "refreshing", "loading_query", "refresh_failure") },
       (listState) => (
         <div className="space-y-3">
-          {listState.state === "refreshing" && (
-            <p role="status" aria-live="polite" className="text-sm text-slate-500">
-              Refreshing
-            </p>
-          )}
-          {listState.state === "loading_query" && (
-            <p role="status" aria-live="polite" className="text-sm text-slate-500">
-              Updating results
-            </p>
-          )}
           {listState.state !== "loading_query" && totalItems !== undefined && totalItems > 0 && (
             <p className="text-sm text-slate-600">{countLabel(filter, totalItems, search)}</p>
           )}
