@@ -1,20 +1,34 @@
 import { getRouteApi } from "@tanstack/react-router";
+import { useRef } from "react";
 
 import { TodoFilters } from "../components/TodoFilters";
 import { TodoList } from "../components/TodoList";
+import { TodoSearch } from "../components/TodoSearch";
 import { CreateTodoForm } from "../components/CreateTodoForm";
 import { usePatchTodoCompletionMutation } from "../hooks/usePatchTodoCompletionMutation";
 import { useDeleteTodoMutation } from "../hooks/useDeleteTodoMutation";
 import { useReplaceTodoMutation } from "../hooks/useReplaceTodoMutation";
 import { useTodoListQuery } from "../hooks/useTodoListQuery";
 import { getTodoStatusFilter } from "../module/todo.filter";
+import { getTodoListSearchLink } from "../module/todo.search";
 import { getTodoListViewState } from "../module/todo.state";
 
 const homeRoute = getRouteApi("/");
 
 export function HomePage() {
-  const filter = getTodoStatusFilter(homeRoute.useSearch());
-  const query = useTodoListQuery(filter);
+  const urlSearch = homeRoute.useSearch();
+  const navigate = homeRoute.useNavigate();
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const filter = getTodoStatusFilter(urlSearch);
+  const search = urlSearch.search;
+  const query = useTodoListQuery({ status: filter, search });
+
+  const commitSearch = (next: string | undefined) =>
+    void navigate({
+      to: "/",
+      search: getTodoListSearchLink({ status: filter, search: next }),
+      replace: true,
+    });
   const completionMutation = usePatchTodoCompletionMutation();
   const replacementMutation = useReplaceTodoMutation();
   const deletionMutation = useDeleteTodoMutation();
@@ -61,10 +75,17 @@ export function HomePage() {
     <main className="mx-auto max-w-md p-8">
       <h1 className="mb-4 text-2xl font-semibold">Todo</h1>
       <CreateTodoForm />
+      <TodoSearch value={search} onCommit={commitSearch} inputRef={searchInputRef} />
       <TodoFilters />
       <TodoList
         state={state}
         filter={filter}
+        search={search}
+        onClearSearch={() => {
+          commitSearch(undefined);
+          searchInputRef.current?.focus();
+        }}
+        totalItems={query.data?.totalItems}
         completion={completion}
         replacement={replacement}
         deletion={deletion}

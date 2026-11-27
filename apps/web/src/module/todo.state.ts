@@ -14,18 +14,14 @@ export type TodoListQuerySnapshot = {
 export type TodoListViewState =
   | { state: "initial_loading" }
   | { state: "initial_failure"; error: TodoApiError | null; retry: () => void }
-  | { state: "loading_filter"; items: Todo[] }
   | { state: "ready"; items: Todo[] }
+  | { state: "loading_query"; items: Todo[] }
   | { state: "refreshing"; items: Todo[] }
   | { state: "refresh_failure"; items: Todo[]; error: TodoApiError | null; retry: () => void };
 
 export function getTodoListViewState(snapshot: TodoListQuerySnapshot): TodoListViewState {
   return match(snapshot)
     .with({ status: "pending" }, (): TodoListViewState => ({ state: "initial_loading" }))
-    .with(
-      { status: "success", data: P.nonNullable, isPlaceholderData: true },
-      ({ data }): TodoListViewState => ({ state: "loading_filter", items: data.items }),
-    )
     .with({ status: "error", data: P.nullish }, ({ error, refetch }): TodoListViewState => ({
       state: "initial_failure",
       error,
@@ -39,6 +35,10 @@ export function getTodoListViewState(snapshot: TodoListQuerySnapshot): TodoListV
         error,
         retry: refetch,
       }),
+    )
+    .with(
+      { status: "success", data: P.nonNullable, isPlaceholderData: true },
+      ({ data }): TodoListViewState => ({ state: "loading_query", items: data.items }),
     )
     .with(
       { status: "success", data: P.nonNullable, isFetching: true },
