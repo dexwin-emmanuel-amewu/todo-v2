@@ -4,5 +4,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["tests", "playwright.config.ts"]
+  "include": ["tests", "stack", "playwright.config.ts", "playwright.stack.config.ts"]
 }
