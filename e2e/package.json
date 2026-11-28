@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
+    "test:stack": "playwright test --config playwright.stack.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

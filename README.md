@@ -1,3 +1,21 @@
+## Run the full app with Docker
+
+One command builds and starts PostgreSQL, the migration, the API, and the web app:
+
+```
+docker compose up --build -d --wait
+```
+
+Open `http://localhost:8080`. The web server proxies `/todos` and `/health` to the API, so `curl http://localhost:8080/health` returns `{ "status": "ok" }`.
+
+The services start in order. `postgres` must be healthy, then `migrate` applies `apps/api/drizzle` and exits, then `api` starts and must pass `/health`, then `web` starts. If the migration fails, the API never starts and the command fails.
+
+The host ports are 5432 for Postgres and 8080 for the web app. Set `POSTGRES_PORT` or `WEB_PORT` to use others. The API is not published to the host.
+
+Stop it with `docker compose down`. Your data is kept in the `postgres-data` volume. To start from a clean database, run `docker compose down -v` first. This deletes all local todos, including the ones you use with `pnpm dev`.
+
+The same command is `pnpm docker:app`.
+
 ## Setup
 
 pnpm install
@@ -7,6 +25,9 @@ cp .env.example .env
 
 Start Postgres first:
 pnpm docker:up
+
+Apply the migrations:
+pnpm --filter api db:migrate
 
 Both apps at once:
 pnpm dev
@@ -26,7 +47,7 @@ Paginate with `?page=<n>&pageSize=<n>`. `page` defaults to 1, `pageSize` default
 
 pnpm --filter web dev (Runs on `http://localhost:5173`.)
 
-The home page lists every todo from `GET /todos`, oldest first, showing each title and an Active or Completed badge. It is read-only for now: there is no add, toggle, edit, or delete, and no filter, search, or pagination control.
+The home page lists todos from `GET /todos`, oldest first. You can add, edit, toggle, and delete a todo. You can filter by All, Active, or Completed, search titles, and change the page and page size. The toggle-all control marks every todo completed or active, and "Clear completed" deletes the completed todos. Selection mode selects up to 100 todos across pages to mark them completed, mark them active, or delete them.
 
 Stop Postgres when you're done:
 pnpm docker:down
@@ -128,3 +149,13 @@ Success: 200 with `{ "deletedCount": number }`, the count of todos actually remo
 apps/api's tests need Postgres running (pnpm docker:up). They create their own disposable database per run and drop it when done, so they won't touch your local data.
 pnpm --filter api test
 pnpm --filter web test
+
+`pnpm test:e2e` runs the Playwright specs in `e2e/tests`. They start the web dev server and mock the API, so they cover error and pending states a real server cannot produce on demand.
+
+`pnpm test:stack` runs `e2e/stack` against the real Docker app on `http://localhost:8080` with no mocks. It deletes every todo in that app before each test, so never point it at data you want to keep. Set `STACK_URL` to point it elsewhere.
+
+```
+docker compose down -v
+docker compose up --build -d --wait
+pnpm test:stack
+```
